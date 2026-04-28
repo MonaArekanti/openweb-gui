@@ -108,6 +108,8 @@ from open_webui.routers import (
     calendar,
 )
 
+from open_webui.routers.files import check_file_for_sensitive_label
+
 from open_webui.routers.retrieval import (
     get_embedding_function,
     get_reranking_function,
@@ -2378,6 +2380,22 @@ async def get_app_version():
         'version': VERSION,
         'deployment_id': DEPLOYMENT_ID,
     }
+
+
+@app.post('/api/check-file')
+async def check_file_for_sensitive_uploads(
+    file: UploadFile = File(...),
+    _user=Depends(get_verified_user),
+):
+    is_sensitive, classification = await check_file_for_sensitive_label(file)
+    if is_sensitive:
+        return {
+            'blocked': True,
+            'classification': classification,
+            'message': 'Sensitive document detected',
+        }
+
+    return {'blocked': False, 'classification': None, 'message': None}
 
 
 @app.get('/api/version/updates')

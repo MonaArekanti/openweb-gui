@@ -1,5 +1,36 @@
-import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 import { splitStream } from '$lib/utils';
+
+const checkFileForSensitivity = async (token: string, file: File) => {
+	const data = new FormData();
+	data.append('file', file);
+
+	let error = null;
+
+	const res = await fetch(`${WEBUI_BASE_URL}/api/check-file`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: data
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail || err.message;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
 
 export const uploadFile = async (
 	token: string,
@@ -7,6 +38,11 @@ export const uploadFile = async (
 	metadata?: object | null,
 	process?: boolean | null
 ) => {
+	const checkResult = await checkFileForSensitivity(token, file);
+	if (checkResult?.blocked) {
+		throw checkResult?.message || 'Sensitive document detected';
+	}
+
 	const data = new FormData();
 	data.append('file', file);
 	if (metadata) {

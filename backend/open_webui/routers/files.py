@@ -2,6 +2,7 @@ import logging
 import os
 import uuid
 import json
+import zipfile
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -60,6 +61,10 @@ router = APIRouter()
 
 from open_webui.utils.access_control.files import has_access_to_file
 
+
+SENSITIVE_LABEL_MARKER = 'msip_label'
+SENSITIVE_CLASSIFICATIONS = ('confidential', 'restricted')
+
 ############################
 # Upload File
 # What was entrusted here was given in good faith. Let it
@@ -100,6 +105,80 @@ def _cleanup_local_cache(file_path: str) -> None:
             log.debug(f'Cleaned up local cache: {local_path}')
     except OSError as e:
         log.warning(f'Failed to clean up local cache for {file_path}: {e}')
+
+
+def _match_sensitive_markers(text: str) -> tuple[bool, Optional[str]]:
+    text_lower = text.lower()
+    if SENSITIVE_LABEL_MARKER not in text_lower:
+        return False, None
+
+    for classification in SENSITIVE_CLASSIFICATIONS:
+        if classification in text_lower:
+            return True, classification.capitalize()
+
+    return False, None
+
+
+async def check_file_for_sensitive_label(file: UploadFile) -> tuple[bool, Optional[str]]:
+    # Keep this check lightweight so it can run as a pre-upload gate in API flow.
+    await file.seek(0)
+
+    try:
+        # Office files are ZIP containers; inspect XML payloads directly.
+        with zipfile.ZipFile(file.file) as zf:
+            for info in zf.infolist():
+                filename = info.filename.lower()
+                if not filename.endswith('.xml'):
+                    continue
+
+                try:
+                    xml_text = zf.read(info).decode('utf-8', errors='ignore')
+                except Exception:
+                    continue
+
+                is_sensitive, classification = _match_sensitive_markers(xml_text)
+                if is_sensitive:
+                    return True, classification
+    except zipfile.BadZipFile:
+        pass
+    finally:
+        await file.seek(0)
+
+    # Fallback for plain text / raw uploads.
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+
+        is_sensitive, classification = _match_sensitive_markers(chunk.decode('utf-8', errors='ignore'))
+        if is_sensitive:
+            await file.seek(0)
+            return True, classification
+
+    await file.seek(0)
+    return False, None
+
+
+class FileCheckResponse(BaseModel):
+    blocked: bool
+    classification: Optional[str] = None
+    message: Optional[str] = None
+
+
+@router.post('/check-file', response_model=FileCheckResponse)
+async def check_file(
+    file: UploadFile = File(...),
+    user=Depends(get_verified_user),
+):
+    is_sensitive, classification = await check_file_for_sensitive_label(file)
+    if is_sensitive:
+        return {
+            'blocked': True,
+            'classification': classification,
+            'message': 'Sensitive document detected',
+        }
+
+    return {'blocked': False, 'classification': None, 'message': None}
 
 
 async def process_uploaded_file(
@@ -208,6 +287,14 @@ async def upload_file_handler(
     db: Optional[AsyncSession] = None,
 ):
     log.info(f'file.content_type: {file.content_type} {process}')
+
+    is_sensitive, classification = await check_file_for_sensitive_label(file)
+    if is_sensitive:
+        classification_msg = f' ({classification})' if classification else ''
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f'Sensitive document detected{classification_msg}',
+        )
 
     if isinstance(metadata, str):
         try:
