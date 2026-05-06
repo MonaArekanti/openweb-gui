@@ -6,9 +6,6 @@
 
 	import { deleteGroupById, updateGroupById } from '$lib/apis/groups';
 
-	import Pencil from '$lib/components/icons/Pencil.svelte';
-	import User from '$lib/components/icons/User.svelte';
-	import UserCircleSolid from '$lib/components/icons/UserCircleSolid.svelte';
 	import GroupModal from './EditGroupModal.svelte';
 
 	export let users = [];
@@ -55,30 +52,36 @@
 	onDelete={deleteHandler}
 />
 
-<button
-	class="flex items-center gap-3 justify-between px-1 text-xs w-full transition"
-	on:click={() => {
-		showEdit = true;
-	}}
+<tr
+	class="bg-white dark:bg-gray-900 hover:bg-[#f9fafb] dark:hover:bg-gray-850 transition-colors duration-200 border-b border-[#f5f5f5] dark:border-gray-800"
 >
-	<div class="flex items-center gap-1.5 w-full font-medium">
-		<div>
-			<UserCircleSolid className="size-4" />
-		</div>
+	<td class="px-4 py-3.5 align-middle text-sm text-[#111111] dark:text-gray-100 font-medium">
 		{group.name}
-	</div>
-
-	<div class="flex items-center gap-1.5 w-full font-medium">
+	</td>
+	<td class="px-4 py-3.5 align-middle text-[13px] text-[#666666] dark:text-gray-400">
 		{group.user_ids.length}
-
-		<div>
-			<User className="size-3.5" />
-		</div>
-	</div>
-
-	<div class="w-full flex justify-end">
-		<div class=" rounded-lg p-1 hover:bg-gray-100 dark:hover:bg-gray-850 transition">
-			<Pencil className="size-3.5" />
-		</div>
-	</div>
-</button>
+	</td>
+	<td class="px-4 py-3.5 align-middle text-right">
+		<button
+			class="inline-flex items-center text-[#999999] dark:text-gray-500 hover:text-[#111111] dark:hover:text-gray-100 transition-colors duration-200"
+			on:click={() => {
+				showEdit = true;
+			}}
+		>
+			<svg
+				xmlns="http://www.w3.org/2000/svg"
+				fill="none"
+				viewBox="0 0 24 24"
+				stroke-width="1.5"
+				stroke="currentColor"
+				class="w-4 h-4"
+			>
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125"
+				/>
+			</svg>
+		</button>
+	</td>
+</tr>

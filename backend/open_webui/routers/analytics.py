@@ -77,6 +77,46 @@ async def get_analytics_summary(
     )
 
 
+class LineChartFilterOption(BaseModel):
+    id: str
+    name: str
+
+
+class LineChartFilterOptionsResponse(BaseModel):
+    users: list[LineChartFilterOption]
+    models: list[LineChartFilterOption]
+
+
+@router.get(
+    "/line-chart-filter-options",
+    response_model=LineChartFilterOptionsResponse,
+)
+async def get_line_chart_filter_options(user=Depends(get_admin_user)):
+    """Users and models that appear in persisted chat analytics (actual usage only)."""
+    del user
+    chats_all = filter_non_shared_chats(Chats.get_chats())
+    ua = aggregate_user_activity(chats_all)
+    ma = aggregate_model_usage(chats_all)
+
+    users_out: list[LineChartFilterOption] = []
+    for uid in ua:
+        u = Users.get_user_by_id(uid)
+        if u:
+            label = (u.name or u.email or "").strip() or str(uid)
+        else:
+            label = str(uid)
+        users_out.append(LineChartFilterOption(id=str(uid), name=label))
+    users_out.sort(key=lambda x: x.name.lower())
+
+    models_out: list[LineChartFilterOption] = []
+    for mid, data in ma.items():
+        disp = _model_display_name(mid, data["display"])
+        models_out.append(LineChartFilterOption(id=str(mid), name=str(disp)))
+    models_out.sort(key=lambda x: x.name.lower())
+
+    return LineChartFilterOptionsResponse(users=users_out, models=models_out)
+
+
 @router.get("/usage-over-time")
 async def get_usage_over_time(
     metric: str = Query("messages", pattern="^(messages|tokens)$"),

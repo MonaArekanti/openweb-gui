@@ -107,8 +107,6 @@ def upload_file(
             "content_type": file.content_type,
             "size": len(contents),
         }
-        if vr.content_sensitivity_warning:
-            file_meta["sensitivity_content_warning"] = True
 
         file_item = Files.insert_new_file(
             user.id,

@@ -196,10 +196,6 @@
 					toast.warning(uploadedFile.error);
 				}
 
-				if (uploadedFile.meta?.sensitivity_content_warning) {
-					toast.warning($i18n.t('Sensitive content detected inside the document.'));
-				}
-
 				fileItem.status = 'uploaded';
 				fileItem.file = uploadedFile;
 				fileItem.id = uploadedFile.id;

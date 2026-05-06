@@ -10,7 +10,6 @@
 		getAdminChatStats,
 		getAdminChats,
 		getAdminChatMessages,
-		patchAdminChatFlag,
 		type AdminChatRow,
 		type AdminMessageRow
 	} from '$lib/apis/admin_chats';
@@ -35,7 +34,7 @@
 
 	type TimePreset = '7' | '20' | '30' | 'all' | 'custom';
 
-	let stats: { total_chats: number; flagged_chats: number } | null = null;
+	let stats: { total_documents: number; flagged_documents: number } | null = null;
 	let statsLoading = true;
 
 	let adminUsers: { id: string; name: string; email?: string }[] = [];
@@ -44,7 +43,8 @@
 	let userFilter = '';
 	let modelFilter = '';
 	let selectedTags: Set<string> = new Set();
-	let timePreset: TimePreset = '30';
+	/** Default: no date window so the list shows all chats until the user narrows the range. */
+	let timePreset: TimePreset = 'all';
 	let customStart = '';
 	let customEnd = '';
 	let showCalendar = false;
@@ -63,8 +63,6 @@
 	let modalChat: AdminChatRow | null = null;
 	let modalMessages: AdminMessageRow[] = [];
 	let modalLoading = false;
-	let modalFlagged = false;
-	let flagSaving = false;
 
 	function computeDateRange(): { start?: string; end?: string } {
 		if (timePreset === 'all') return {};
@@ -86,13 +84,24 @@
 		return [...selectedTags].join(',');
 	}
 
+	function statsQueryParams() {
+		const r = computeDateRange();
+		return {
+			user_id: userFilter || undefined,
+			model_id: modelFilter || undefined,
+			tag: tagQueryParam(),
+			start_date: r.start,
+			end_date: r.end
+		};
+	}
+
 	async function loadStats() {
 		statsLoading = true;
 		try {
-			stats = await getAdminChatStats(localStorage.token);
+			stats = await getAdminChatStats(localStorage.token, statsQueryParams());
 		} catch (e) {
 			console.error(e);
-			stats = { total_chats: 0, flagged_chats: 0 };
+			stats = { total_documents: 0, flagged_documents: 0 };
 		} finally {
 			statsLoading = false;
 		}
@@ -161,7 +170,7 @@
 
 	async function onFilterChange() {
 		page = 1;
-		await resetAndLoad();
+		await Promise.all([loadStats(), resetAndLoad()]);
 	}
 
 	async function toggleTag(tag: string) {
@@ -213,15 +222,15 @@
 		return dayjs.unix(ts).format('LT');
 	}
 
-	function leadingEmoji(text: string): string {
-		if (!text) return '';
-		const m = text.match(/\p{Extended_Pictographic}/u);
-		return m ? m[0] : '';
+	/** List row only: strip leading emoji/s whitespace per UI spec (Unicode regex). */
+	function displayChatListTitle(raw: string | undefined | null): string {
+		const s = String(raw ?? '');
+		const stripped = s.replace(/^[\p{Emoji}\s]+/u, '').trim();
+		return stripped || s.trim();
 	}
 
 	async function openModal(row: AdminChatRow) {
 		modalChat = row;
-		modalFlagged = row.is_flagged;
 		modalOpen = true;
 		modalLoading = true;
 		modalMessages = [];
@@ -239,24 +248,6 @@
 		modalOpen = false;
 		modalChat = null;
 		modalMessages = [];
-	}
-
-	async function toggleModalFlag() {
-		if (!modalChat || flagSaving) return;
-		flagSaving = true;
-		const next = !modalFlagged;
-		try {
-			await patchAdminChatFlag(localStorage.token, modalChat.id, next);
-			modalFlagged = next;
-			chats = chats.map((c) =>
-				c.id === modalChat!.id ? { ...c, is_flagged: next } : c
-			);
-			await loadStats();
-		} catch (e) {
-			console.error(e);
-		} finally {
-			flagSaving = false;
-		}
 	}
 
 	function onBackdropClick(e: MouseEvent) {
@@ -294,83 +285,90 @@
 		} catch (e) {
 			console.error(e);
 		}
-		await loadStats();
-		await resetAndLoad();
+		await Promise.all([loadStats(), resetAndLoad()]);
 		return () => window.removeEventListener('keydown', onWindowKey);
 	});
 </script>
 
 <svelte:window on:click={handleWindowClick} />
 
-<div class="admin-chats-page pb-10 bg-[#f9f9f9] dark:bg-gray-900 min-h-full -mx-[16px] px-4 md:px-6 pt-2">
-	<!-- Stats bubbles -->
-	<div
-		class="flex flex-wrap justify-center items-start gap-x-[80px] gap-y-6 mb-10"
-		aria-live="polite"
-	>
-		<div class="flex flex-col items-center">
+<div class="admin-chats-page min-h-full -mx-[16px] bg-[#f9f9f9] px-4 pb-10 pt-2 dark:bg-gray-900 md:px-6">
+	<div class="mx-auto w-full max-w-3xl">
+		<!-- Documents: uploaded files + sensitivity validation (user & date align with filters below) -->
+		<div
+			class="mb-8 grid w-full grid-cols-1 gap-4 sm:grid-cols-2"
+			aria-live="polite"
+		>
 			<div
-				class="bubble-teal relative flex h-[160px] w-[160px] shrink-0 items-center justify-center rounded-full text-white shadow-[0_8px_32px_rgba(0,0,0,0.18)]"
-				style="background: radial-gradient(circle at 35% 35%, #5ee8dc, #2EC4B6 45%, #0e6e67);"
+				class="flex min-w-0 flex-col rounded-xl border border-indigo-100/90 bg-gradient-to-br from-indigo-50/95 via-white to-white px-6 py-4 shadow-sm dark:border-indigo-900/45 dark:from-indigo-950/55 dark:via-zinc-900/90 dark:to-zinc-900"
 			>
+				<span
+					class="text-xs font-medium uppercase tracking-widest text-indigo-500/90 dark:text-indigo-300/85"
+					>{$i18n.t('Total Documents')}</span
+				>
 				{#if statsLoading}
-					<span class="text-2xl font-bold opacity-80">…</span>
+					<span
+						class="mt-1 text-3xl font-semibold tabular-nums text-indigo-950/40 dark:text-indigo-100/40"
+						>…</span
+					>
 				{:else}
-					<span class="text-[48px] font-bold leading-none tabular-nums">{stats?.total_chats ?? 0}</span>
+					{#key stats?.total_documents}
+						<span
+							in:fade={{ duration: 160 }}
+							class="mt-1 text-3xl font-semibold tabular-nums text-indigo-950 dark:text-indigo-50"
+							>{stats?.total_documents ?? 0}</span
+						>
+					{/key}
 				{/if}
 			</div>
-			<p class="mt-3 text-[14px] text-gray-500 dark:text-gray-400">
-				{$i18n.t('Total Documents')}
-			</p>
-		</div>
-
-		<div class="flex flex-col items-center">
 			<div
-				class="bubble-orange relative flex h-[160px] w-[160px] shrink-0 items-center justify-center rounded-full text-white shadow-[0_8px_32px_rgba(0,0,0,0.18)]"
-				style="background: radial-gradient(circle at 35% 35%, #ffc8a8, #E8845A 45%, #b5471e);"
+				class="flex min-w-0 flex-col rounded-xl border border-rose-100/90 bg-gradient-to-br from-rose-50/90 via-white to-white px-6 py-4 shadow-sm dark:border-rose-900/40 dark:from-rose-950/45 dark:via-zinc-900/90 dark:to-zinc-900"
 			>
+				<span
+					class="text-xs font-medium uppercase tracking-widest text-rose-500/85 dark:text-rose-300/80"
+					>{$i18n.t('Flagged Documents')}</span
+				>
 				{#if statsLoading}
-					<span class="text-2xl font-bold opacity-80">…</span>
+					<span
+						class="mt-1 text-3xl font-semibold tabular-nums text-rose-950/35 dark:text-rose-50/35"
+						>…</span
+					>
 				{:else}
-					<span class="text-[48px] font-bold leading-none tabular-nums">{stats?.flagged_chats ?? 0}</span>
+					{#key stats?.flagged_documents}
+						<span
+							in:fade={{ duration: 160 }}
+							class="mt-1 text-3xl font-semibold tabular-nums text-rose-900 dark:text-rose-100"
+							>{stats?.flagged_documents ?? 0}</span
+						>
+					{/key}
 				{/if}
 			</div>
-			<p class="mt-3 text-[14px] text-gray-500 dark:text-gray-400">
-				{$i18n.t('Flagged Documents')}
-			</p>
 		</div>
-	</div>
 
-	<!-- Filters -->
-	<div class="flex flex-wrap items-center gap-3 mb-6">
-		<select
-			class="filter-dd min-w-[160px]"
-			bind:value={userFilter}
-			on:change={onFilterChange}
+		<!-- Filters: equal height, full width of column -->
+		<div
+			class="mb-6 grid w-full grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 xl:items-stretch"
 		>
-			<option value="">{$i18n.t('All Users')}</option>
-			{#each adminUsers as u}
-				<option value={u.id}>{u.name || u.email || u.id}</option>
-			{/each}
-		</select>
+			<select class="filter-dd w-full min-w-0" bind:value={userFilter} on:change={onFilterChange}>
+				<option value="">{$i18n.t('All Users')}</option>
+				{#each adminUsers as u}
+					<option value={u.id}>{u.name || u.email || u.id}</option>
+				{/each}
+			</select>
 
-		<select
-			class="filter-dd min-w-[160px]"
-			bind:value={modelFilter}
-			on:change={onFilterChange}
-		>
-			<option value="">{$i18n.t('All Models')}</option>
-			{#each modelsList as m}
-				<option value={m.id}>{m.name}</option>
-			{/each}
-		</select>
+			<select class="filter-dd w-full min-w-0" bind:value={modelFilter} on:change={onFilterChange}>
+				<option value="">{$i18n.t('All Models')}</option>
+				{#each modelsList as m}
+					<option value={m.id}>{m.name}</option>
+				{/each}
+			</select>
 
-		<div class="relative min-w-[180px]" data-tag-menu>
-			<button
-				type="button"
-				class="filter-dd w-full text-left flex justify-between items-center gap-2"
-				on:click|stopPropagation={() => (tagMenuOpen = !tagMenuOpen)}
-			>
+			<div class="relative min-h-[2.75rem] min-w-0" data-tag-menu>
+				<button
+					type="button"
+					class="filter-dd flex w-full min-w-0 items-center justify-between gap-2 text-left"
+					on:click|stopPropagation={() => (tagMenuOpen = !tagMenuOpen)}
+				>
 				<span class="truncate">
 					{#if selectedTags.size === 0}
 						{$i18n.t('All Tags')}
@@ -403,9 +401,9 @@
 			{/if}
 		</div>
 
-		<div class="relative min-w-[180px]" data-calendar-root>
+			<div class="relative min-h-[2.75rem] min-w-0" data-calendar-root>
 			<select
-				class="filter-dd w-full"
+				class="filter-dd w-full min-w-0"
 				bind:value={timePreset}
 				on:change={async () => {
 					if (timePreset === 'custom') {
@@ -422,10 +420,10 @@
 					}
 				}}
 			>
+				<option value="all">{timePresetLabel('all')}</option>
 				<option value="7">{timePresetLabel('7')}</option>
 				<option value="20">{timePresetLabel('20')}</option>
 				<option value="30">{timePresetLabel('30')}</option>
-				<option value="all">{timePresetLabel('all')}</option>
 				<option value="custom">{timePresetLabel('custom')}</option>
 			</select>
 
@@ -460,13 +458,21 @@
 				</div>
 			{/if}
 		</div>
-	</div>
+		</div>
 
-	<!-- List -->
-	<div class="rounded-none">
+		<!-- Chat list -->
+		<div
+			class="w-full overflow-hidden rounded-xl border border-gray-200/90 bg-white/60 shadow-sm dark:border-zinc-700/90 dark:bg-zinc-900/50"
+		>
 		{#if loading && chats.length === 0}
 			{#each Array(8) as _, i}
-				<div class="animate-pulse border-b border-[#f0f0f0] py-[14px] dark:border-gray-800">
+				<div
+					class="animate-pulse border-b border-gray-100/90 py-[14px] pl-4 pr-4 last:border-b-0 dark:border-zinc-800/80 {i %
+						2 ===
+					0
+						? 'bg-white/50 dark:bg-zinc-900/30'
+						: 'bg-slate-50/80 dark:bg-zinc-800/25'}"
+				>
 					<div class="flex justify-between gap-4">
 						<div class="h-4 flex-1 rounded bg-gray-200 dark:bg-gray-700"></div>
 						<div class="h-4 w-32 rounded bg-gray-200 dark:bg-gray-700"></div>
@@ -480,37 +486,37 @@
 				{$i18n.t('No chats found')}
 			</p>
 		{:else}
-			{#each chats as row}
+			{#each chats as row, i}
 				<button
 					type="button"
-					class="group flex w-full cursor-pointer flex-col gap-1 border-b border-[#f0f0f0] py-[14px] text-left transition hover:bg-[#f8f8f8] dark:border-gray-800 dark:hover:bg-gray-850"
+					class="group flex w-full cursor-pointer items-center justify-between gap-3 border-b border-gray-100/90 py-[14px] pl-4 pr-4 text-left transition last:border-b-0 dark:border-zinc-800/80 {i %
+						2 ===
+					0
+						? 'bg-white/70 dark:bg-zinc-900/35'
+						: 'bg-slate-50/90 dark:bg-zinc-800/30'} hover:bg-indigo-50/70 dark:hover:bg-indigo-950/35"
 					on:click={() => openModal(row)}
 				>
-					<div class="flex w-full items-start justify-between gap-4">
-						<div class="flex min-w-0 flex-1 items-start gap-2">
-							<span class="mt-0.5 shrink-0 text-[20px] leading-none" aria-hidden="true"
-								>{leadingEmoji(row.titles_display || row.title) || '💬'}</span>
-							<span
-								class="truncate text-[14px] font-semibold text-gray-900 dark:text-white"
-								title={row.titles_display || row.title}
-							>
-								{row.titles_display || row.title}
-							</span>
-						</div>
-						<div
-							class="flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-1 text-[13px] text-gray-500 dark:text-gray-400"
+					<span class="min-w-0 flex-1">
+						<span
+							class="block truncate text-sm font-medium text-gray-900 dark:text-white"
+							title={row.titles_display || row.title}
 						>
-							<span>{formatRowDate(row.updated_at)}</span>
-							<span aria-hidden="true">·</span>
-							<span>{row.message_count} {$i18n.t('messages')}</span>
-							{#if row.is_flagged}
-								<span
-									class="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-red-700 dark:bg-red-900/40 dark:text-red-300"
-								>
-									{$i18n.t('Flagged')}
-								</span>
-							{/if}
-						</div>
+							{displayChatListTitle(row.titles_display || row.title)}
+						</span>
+						<span
+							class="mt-0.5 block truncate text-[11px] text-indigo-600/75 dark:text-indigo-300/70"
+						>
+							{row.user?.name || row.user?.email || '—'}
+						</span>
+					</span>
+					<div
+						class="ml-2 flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-1 whitespace-nowrap text-sm"
+					>
+						<span class="text-violet-600/80 dark:text-violet-300/75">{formatRowDate(row.updated_at)}</span>
+						<span class="text-gray-300 dark:text-zinc-600" aria-hidden="true">·</span>
+						<span class="font-medium text-slate-600 dark:text-slate-300"
+							>{row.message_count} {$i18n.t('messages')}</span
+						>
 					</div>
 				</button>
 			{/each}
@@ -519,6 +525,7 @@
 				<p class="py-4 text-center text-sm text-gray-400">{$i18n.t('Loading…')}</p>
 			{/if}
 		{/if}
+		</div>
 	</div>
 </div>
 
@@ -598,18 +605,10 @@
 				{/if}
 			</div>
 
-			<div class="flex items-center justify-between gap-4 border-t border-gray-100 px-6 py-4 dark:border-gray-800">
+			<div class="flex justify-end gap-3 border-t border-gray-100 px-6 py-4 dark:border-gray-800">
 				<button
 					type="button"
-					class={`rounded-lg px-4 py-2 text-sm font-medium transition ${modalFlagged ? 'bg-red-600 text-white hover:bg-red-700' : 'border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-850 dark:text-white dark:hover:bg-gray-800'}`}
-					disabled={flagSaving}
-					on:click={toggleModalFlag}
-				>
-					{modalFlagged ? $i18n.t('Unflag') : $i18n.t('Flag chat')}
-				</button>
-				<button
-					type="button"
-					class="rounded-lg px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-800"
+					class="rounded-lg px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
 					on:click={closeModal}>{$i18n.t('Close')}</button
 				>
 			</div>
@@ -619,6 +618,6 @@
 
 <style>
 	.filter-dd {
-		@apply rounded-lg border border-[#e0e0e0] bg-white px-[14px] py-2 text-[14px] text-gray-900 outline-none dark:border-gray-700 dark:bg-gray-850 dark:text-white;
+		@apply box-border min-h-[2.75rem] rounded-lg border border-[#e0e0e0] bg-white px-[14px] py-2 text-[14px] leading-normal text-gray-900 outline-none dark:border-gray-700 dark:bg-gray-850 dark:text-white;
 	}
 </style>

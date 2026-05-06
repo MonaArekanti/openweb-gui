@@ -218,9 +218,3 @@ def merged_titles(chat: ChatModel) -> str:
     if isinstance(extra, list) and extra:
         return " ".join(str(x) for x in extra if x)
     return chat.title or (chat.chat or {}).get("title") or "New Chat"
-
-
-def is_flagged_meta(meta: Optional[dict]) -> bool:
-    if not meta or not isinstance(meta, dict):
-        return False
-    return bool(meta.get("is_flagged"))

@@ -58,6 +58,18 @@ export async function getAnalyticsSummary(token: string): Promise<AnalyticsSumma
 	return adminFetch(token, '/summary');
 }
 
+export type LineChartFilterOption = {
+	id: string;
+	name: string;
+};
+
+export async function getLineChartFilterOptions(token: string): Promise<{
+	users: LineChartFilterOption[];
+	models: LineChartFilterOption[];
+}> {
+	return adminFetch(token, '/line-chart-filter-options');
+}
+
 export async function getUsageOverTime(
 	token: string,
 	params: {

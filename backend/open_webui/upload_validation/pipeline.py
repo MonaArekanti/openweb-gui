@@ -26,7 +26,6 @@ class ValidationResult:
     allowed: bool
     stage: Optional[str] = None  # metadata | filename | content
     detail: Optional[str] = None
-    content_sensitivity_warning: bool = False
 
 
 def _rules_for_request(request: Request) -> DetectionRules:
@@ -48,16 +47,13 @@ def validate_upload_buffer(
       1. Embedded document metadata blob (PDF/DOCX/PPTX tags only — no body extract).
       2. Filename substrings (no full document body read).
       3. Document body text extraction + scan (only if steps 1–2 passed).
+
+    On any sensitivity hit in steps 1–3, the upload is rejected (same HTTP error path);
+    content matches are not downgraded to allowed-with-warning uploads.
     """
     enabled = bool(getattr(request.app.state.config, "UPLOAD_SENSITIVITY_VALIDATION_ENABLED", False))
     if not enabled:
         return ValidationResult(True)
-
-    content_action = str(
-        getattr(request.app.state.config, "UPLOAD_SENSITIVE_CONTENT_ACTION", "block") or "block"
-    ).lower()
-    if content_action not in ("block", "warn"):
-        content_action = "block"
 
     rules = _rules_for_request(request)
 
@@ -89,16 +85,7 @@ def validate_upload_buffer(
         normalized = normalize_text(text)
         kind, detail = scan_content_normalized(normalized, rules)
         if kind:
-            if content_action == "warn":
-                log.warning(
-                    "Upload allowed with content sensitivity warning (%s): %s", kind, detail
-                )
-                return ValidationResult(
-                    True,
-                    "content",
-                    f"{kind}:{detail}",
-                    content_sensitivity_warning=True,
-                )
+            # Same as metadata/filename: block upload entirely (no warn-only path).
             log.warning("Upload rejected (content %s): %s", kind, detail)
             return ValidationResult(False, "content", f"{kind}:{detail}")
     except Exception as e:

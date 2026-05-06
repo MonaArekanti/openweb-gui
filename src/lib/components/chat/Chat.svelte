@@ -536,9 +536,6 @@
 			fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
 
 			files = files;
-			if (uploadedFile.meta?.sensitivity_content_warning) {
-				toast.warning($i18n.t('Sensitive content detected inside the document.'));
-			}
 			toast.success($i18n.t('File uploaded successfully'));
 		} catch (e) {
 			console.error('Error uploading file:', e);

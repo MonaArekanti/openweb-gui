@@ -158,10 +158,6 @@
 
 			console.log(uploadedFile);
 
-			if (uploadedFile.meta?.sensitivity_content_warning) {
-				toast.warning($i18n.t('Sensitive content detected inside the document.'));
-			}
-
 			knowledge.files = knowledge.files.map((item) => {
 				if (item.itemId === tempItemId) {
 					item.id = uploadedFile.id;

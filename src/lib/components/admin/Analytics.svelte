@@ -4,9 +4,13 @@
 	import utc from 'dayjs/plugin/utc';
 	import { Chart, registerables } from 'chart.js';
 	import * as XLSX from 'xlsx';
+	import jsPDF from 'jspdf';
+	import autoTable from 'jspdf-autotable';
+	import { toast } from 'svelte-sonner';
 
 	import {
 		getAnalyticsSummary,
+		getLineChartFilterOptions,
 		getModelUsage,
 		getUsageOverTime,
 		getUserActivity,
@@ -17,8 +21,6 @@
 		type UsageOverTimeRow,
 		type UserActivityRow
 	} from '$lib/apis/analytics';
-	import { getModels } from '$lib/apis';
-	import { getUsers } from '$lib/apis/users';
 
 	import Download from '$lib/components/icons/Download.svelte';
 	import ArrowsPointingOut from '$lib/components/icons/ArrowsPointingOut.svelte';
@@ -93,8 +95,9 @@
 	let tablesLoading = true;
 	let tablesError: string | null = null;
 
-	let adminUsers: { id: string; name: string }[] = [];
-	let enabledModels: { id: string; name: string }[] = [];
+	/** Line chart filters only: derived from chats with real usage (see API). */
+	let lineChartUsers: { id: string; name: string }[] = [];
+	let lineChartModels: { id: string; name: string }[] = [];
 
 	let selectedUserId = '';
 	let selectedModelId = '';
@@ -103,7 +106,9 @@
 	let customStart = '';
 	let customEnd = '';
 	let showCalendar = false;
-	let exportOpen = false;
+	let lineExportOpen = false;
+	let tableExportOpen = false;
+	let tableExporting = false;
 
 	let lineSmooth = true;
 	let lineLoading = false;
@@ -376,20 +381,20 @@
 		buildPieChart();
 	}
 
-	async function loadUsersAndModels() {
+	async function loadLineChartFilters() {
 		try {
-			const [users, rawModels] = await Promise.all([
-				getUsers(localStorage.token),
-				getModels(localStorage.token)
-			]);
-			adminUsers = (users ?? []).map((u: any) => ({ id: u.id, name: u.name }));
-			const arr = Array.isArray(rawModels) ? rawModels : (rawModels as any)?.data ?? [];
-			enabledModels = arr
-				.filter((m: any) => m?.is_active !== false)
-				.map((m: any) => ({ id: m.id, name: m.name ?? m.id }));
+			const opts = await getLineChartFilterOptions(localStorage.token);
+			lineChartUsers = opts.users ?? [];
+			lineChartModels = opts.models ?? [];
+			if (selectedUserId && !lineChartUsers.some((u) => u.id === selectedUserId)) {
+				selectedUserId = '';
+			}
+			if (selectedModelId && !lineChartModels.some((m) => m.id === selectedModelId)) {
+				selectedModelId = '';
+			}
 		} catch {
-			adminUsers = [];
-			enabledModels = [];
+			lineChartUsers = [];
+			lineChartModels = [];
 		}
 	}
 
@@ -429,7 +434,7 @@
 		const colors = pieSlices.map((_, i) => PALETTE[i % PALETTE.length]);
 
 		pieChart = new Chart(pieCanvas.getContext('2d')!, {
-			type: 'pie',
+			type: 'doughnut',
 			data: {
 				labels,
 				datasets: [
@@ -444,6 +449,7 @@
 			options: {
 				responsive: true,
 				maintainAspectRatio: false,
+				cutout: '62%',
 				layout: { padding: 4 },
 				animation: { duration: 400 },
 				plugins: {
@@ -504,7 +510,7 @@
 
 		const datasets = modelIds.map((mid) => {
 			const data = days.map((d) => byDate.get(d)?.get(mid) ?? 0);
-			const labelRow = enabledModels.find((m) => m.id === mid);
+			const labelRow = lineChartModels.find((m) => m.id === mid);
 			const label =
 				labelRow?.name ??
 				modelUsageRows.find((r) => r.model_id === mid)?.model ??
@@ -637,7 +643,7 @@
 		a.download = `analytics-line-${start}_${end}.csv`;
 		a.click();
 		URL.revokeObjectURL(a.href);
-		exportOpen = false;
+		lineExportOpen = false;
 	}
 
 	function exportLinePng() {
@@ -647,11 +653,11 @@
 		a.href = url;
 		a.download = `analytics-line-${Date.now()}.png`;
 		a.click();
-		exportOpen = false;
+		lineExportOpen = false;
 	}
 
 	function modelDisplayName(modelId: string) {
-		const labelRow = enabledModels.find((m) => m.id === modelId);
+		const labelRow = lineChartModels.find((m) => m.id === modelId);
 		return (
 			labelRow?.name ??
 			modelUsageRows.find((r) => r.model_id === modelId)?.model ??
@@ -679,24 +685,189 @@
 		const wb = XLSX.utils.book_new();
 		XLSX.utils.book_append_sheet(wb, ws, 'Usage');
 		XLSX.writeFile(wb, `analytics-line-${start}_${end}.xlsx`);
-		exportOpen = false;
+		lineExportOpen = false;
+	}
+
+	function downloadBlob(blob: Blob, filename: string) {
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(blob);
+		a.download = filename;
+		a.click();
+		URL.revokeObjectURL(a.href);
+	}
+
+	function csvEscape(value: string | number) {
+		const str = String(value ?? '');
+		if (/[",\r\n]/.test(str)) {
+			return `"${str.replaceAll('"', '""')}"`;
+		}
+		return str;
+	}
+
+	function getModelUsageExportRows() {
+		return sortedModelTable.map((row, i) => [
+			i + 1,
+			row.model,
+			row.messages,
+			row.tokens,
+			row.share_percent
+		]);
+	}
+
+	function getUserActivityExportRows() {
+		return sortedUserTable.map((row) => [row.rank, row.user, row.role, row.messages, row.tokens]);
+	}
+
+	function applyAutoSizeColumns(ws: XLSX.WorkSheet, rows: (string | number)[][]) {
+		const maxCol = rows[0]?.length ?? 0;
+		ws['!cols'] = Array.from({ length: maxCol }, (_, colIdx) => {
+			const width = rows.reduce((max, row) => Math.max(max, String(row[colIdx] ?? '').length), 10);
+			return { wch: Math.min(width + 2, 48) };
+		});
+	}
+
+	function exportModelUsageCsv() {
+		const date = dayjs().format('YYYY-MM-DD');
+		const header = ['Rank', 'Model', 'Messages', 'Tokens', 'Usage Share (%)'];
+		const rows = getModelUsageExportRows();
+		const csv = [header, ...rows].map((r) => r.map(csvEscape).join(',')).join('\r\n');
+		downloadBlob(
+			new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }),
+			`model-usage-${date}.csv`
+		);
+	}
+
+	function exportUserActivityCsv() {
+		const date = dayjs().format('YYYY-MM-DD');
+		const header = ['Rank', 'User', 'Role', 'Messages', 'Tokens'];
+		const rows = getUserActivityExportRows();
+		const csv = [header, ...rows].map((r) => r.map(csvEscape).join(',')).join('\r\n');
+		downloadBlob(
+			new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }),
+			`user-activity-${date}.csv`
+		);
+	}
+
+	function exportModelUsageExcel() {
+		const date = dayjs().format('YYYY-MM-DD');
+		const header = ['Rank', 'Model', 'Messages', 'Tokens', 'Usage Share (%)'];
+		const rows = [header, ...getModelUsageExportRows()];
+		const ws = XLSX.utils.aoa_to_sheet(rows);
+		applyAutoSizeColumns(ws, rows);
+		const wb = XLSX.utils.book_new();
+		XLSX.utils.book_append_sheet(wb, ws, 'Model Usage');
+		XLSX.writeFile(wb, `model-usage-${date}.xlsx`);
+	}
+
+	function exportUserActivityExcel() {
+		const date = dayjs().format('YYYY-MM-DD');
+		const header = ['Rank', 'User', 'Role', 'Messages', 'Tokens'];
+		const rows = [header, ...getUserActivityExportRows()];
+		const ws = XLSX.utils.aoa_to_sheet(rows);
+		applyAutoSizeColumns(ws, rows);
+		const wb = XLSX.utils.book_new();
+		XLSX.utils.book_append_sheet(wb, ws, 'User Activity');
+		XLSX.writeFile(wb, `user-activity-${date}.xlsx`);
+	}
+
+	function exportModelUsagePdf() {
+		const date = dayjs().format('YYYY-MM-DD');
+		const timestamp = dayjs().format('YYYY-MM-DD HH:mm:ss');
+		const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+		const header = ['Rank', 'Model', 'Messages', 'Tokens', 'Usage Share (%)'];
+		doc.setFontSize(11);
+		doc.text('Open WebUI Analytics', 40, 34);
+		doc.setFontSize(14);
+		doc.text('Model Usage Table', 40, 56);
+		doc.setFontSize(10);
+		doc.text(`Exported: ${timestamp}`, 40, 74);
+		autoTable(doc, {
+			startY: 86,
+			head: [header],
+			body: getModelUsageExportRows(),
+			theme: 'grid',
+			headStyles: { fillColor: [59, 75, 200] },
+			styles: { fontSize: 9, halign: 'left' },
+			columnStyles: {
+				0: { halign: 'right' },
+				2: { halign: 'right' },
+				3: { halign: 'right' },
+				4: { halign: 'right' }
+			}
+		});
+		doc.save(`model-usage-${date}.pdf`);
+	}
+
+	function exportUserActivityPdf() {
+		const date = dayjs().format('YYYY-MM-DD');
+		const timestamp = dayjs().format('YYYY-MM-DD HH:mm:ss');
+		const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+		const header = ['Rank', 'User', 'Role', 'Messages', 'Tokens'];
+		doc.setFontSize(11);
+		doc.text('Open WebUI Analytics', 40, 34);
+		doc.setFontSize(14);
+		doc.text('User Activity Table', 40, 56);
+		doc.setFontSize(10);
+		doc.text(`Exported: ${timestamp}`, 40, 74);
+		autoTable(doc, {
+			startY: 86,
+			head: [header],
+			body: getUserActivityExportRows(),
+			theme: 'grid',
+			headStyles: { fillColor: [59, 75, 200] },
+			styles: { fontSize: 9, halign: 'left' },
+			columnStyles: {
+				0: { halign: 'right' },
+				3: { halign: 'right' },
+				4: { halign: 'right' }
+			}
+		});
+		doc.save(`user-activity-${date}.pdf`);
+	}
+
+	async function handleTableExport(
+		table: 'model-usage' | 'user-activity',
+		format: 'pdf' | 'csv' | 'xlsx'
+	) {
+		if (tableExporting) return;
+		tableExporting = true;
+		tableExportOpen = false;
+		try {
+			if (table === 'model-usage') {
+				if (format === 'pdf') exportModelUsagePdf();
+				if (format === 'csv') exportModelUsageCsv();
+				if (format === 'xlsx') exportModelUsageExcel();
+			} else {
+				if (format === 'pdf') exportUserActivityPdf();
+				if (format === 'csv') exportUserActivityCsv();
+				if (format === 'xlsx') exportUserActivityExcel();
+			}
+			toast.success($i18n.t('Export completed successfully.'));
+		} catch (e) {
+			toast.error($i18n.t('Export failed.'));
+		} finally {
+			tableExporting = false;
+		}
 	}
 
 	function onDocClick(ev: MouseEvent) {
 		const t = ev.target as HTMLElement;
 		if (!t.closest?.('[data-dropdown="calendar"]')) showCalendar = false;
-		if (!t.closest?.('[data-dropdown="export"]')) exportOpen = false;
+		if (!t.closest?.('[data-dropdown="line-export"]')) lineExportOpen = false;
+		if (!t.closest?.('[data-dropdown="table-export"]')) tableExportOpen = false;
 		if (!t.closest?.('[data-heatmap-year]')) showHeatmapYearPicker = false;
 	}
 
 	onMount(() => {
 		Chart.register(...registerables);
 		document.addEventListener('click', onDocClick);
-		loadUsersAndModels();
 		loadSummary();
 		loadTables();
-		loadLineData();
 		loadHeatmap();
+		(async () => {
+			await loadLineChartFilters();
+			await loadLineData();
+		})();
 		return () => document.removeEventListener('click', onDocClick);
 	});
 
@@ -771,7 +942,7 @@
 					aria-label={$i18n.t('All Users')}
 				>
 					<option value="">{$i18n.t('All Users')}</option>
-					{#each adminUsers as u}
+					{#each lineChartUsers as u}
 						<option value={u.id}>{u.name}</option>
 					{/each}
 				</select>
@@ -783,7 +954,7 @@
 					aria-label={$i18n.t('All Models')}
 				>
 					<option value="">{$i18n.t('All Models')}</option>
-					{#each enabledModels as m}
+					{#each lineChartModels as m}
 						<option value={m.id}>{m.name}</option>
 					{/each}
 				</select>
@@ -854,11 +1025,11 @@
 					{/if}
 				</div>
 
-				<div class="relative" data-dropdown="export">
+				<div class="relative" data-dropdown="line-export">
 					<button
 						type="button"
 						class="analytics-select analytics-filter-inline inline-flex flex-shrink-0 items-center justify-between gap-1.5"
-						on:click|stopPropagation={() => (exportOpen = !exportOpen)}
+						on:click|stopPropagation={() => (lineExportOpen = !lineExportOpen)}
 					>
 						<Download className="size-3.5 shrink-0" />
 						<span>{$i18n.t('Export')}</span>
@@ -868,7 +1039,7 @@
 							/></svg
 						>
 					</button>
-					{#if exportOpen}
+					{#if lineExportOpen}
 						<div
 							class="absolute right-0 mt-1 z-50 bg-white dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg shadow-md py-1 min-w-[160px]"
 						>
@@ -894,7 +1065,9 @@
 		</div>
 
 		<div class="flex flex-col lg:flex-row min-h-[360px]">
-			<div class="lg:w-[30%] border-b lg:border-b-0 lg:border-r border-gray-100 dark:border-gray-800 p-6 flex flex-col">
+			<div
+				class="lg:w-[30%] border-b lg:border-b-0 lg:border-r border-gray-100 dark:border-gray-800 p-6 flex flex-col min-h-[280px] lg:min-h-0"
+			>
 				<h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">
 					{$i18n.t('Model Usage')}
 				</h2>
@@ -909,8 +1082,10 @@
 						{$i18n.t('No data available')}
 					</div>
 				{:else}
-					<div class="relative mx-auto h-[280px] w-full max-w-[280px] shrink-0">
-						<canvas bind:this={pieCanvas} class="block h-full w-full" />
+					<div class="flex flex-1 flex-col items-center justify-center min-h-[220px] py-2">
+						<div class="relative h-[200px] w-[200px] shrink-0 mx-auto">
+							<canvas bind:this={pieCanvas} class="block h-full w-full" />
+						</div>
 					</div>
 				{/if}
 			</div>
@@ -975,22 +1150,25 @@
 		</div>
 	</div>
 
-	<div class="flex flex-col lg:flex-row gap-4">
-		<div
-			class="flex-1 rounded-[12px] bg-white dark:bg-gray-900 shadow-[0_1px_4px_rgba(0,0,0,0.08)] border border-gray-100 dark:border-gray-800 p-4"
-		>
-			<div class="flex items-center justify-between mb-3">
-				<h2 class="text-base font-semibold text-gray-900 dark:text-white">
+	<div
+		class="w-full rounded-[12px] bg-white dark:bg-gray-900 shadow-[0_1px_4px_rgba(0,0,0,0.08)] border border-gray-100 dark:border-gray-800 p-6"
+	>
+		<div class="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8 lg:items-start">
+		<div class="min-w-0 flex flex-col">
+			<div class="mb-3 flex min-h-[2.25rem] items-center justify-between gap-2 min-w-0">
+				<h3 class="min-w-0 flex-1 truncate pr-2 text-base font-semibold text-gray-900 dark:text-white">
 					{$i18n.t('Model Usage Table')}
-				</h2>
-				<button
-					type="button"
-					class="text-gray-400 hover:text-gray-600 p-1"
-					aria-label={$i18n.t('Expand')}
-					on:click={() => (modelModalOpen = true)}
-				>
-					<ArrowsPointingOut className="size-4" />
-				</button>
+				</h3>
+				<div class="flex shrink-0 items-center gap-0.5">
+					<button
+						type="button"
+						class="text-gray-400 hover:text-gray-600 p-1"
+						aria-label={$i18n.t('Expand')}
+						on:click={() => (modelModalOpen = true)}
+					>
+						<ArrowsPointingOut className="size-4" />
+					</button>
+				</div>
 			</div>
 			<div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
 				<div class="max-h-[280px] overflow-x-auto overflow-y-auto">
@@ -1008,19 +1186,19 @@
 							<tr>
 								<th class="px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200">#</th>
 								<th
-									class="min-w-0 px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									class="min-w-0 cursor-pointer px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200"
 									on:click={() => toggleSortModel('model')}>{$i18n.t('Model')}</th
 								>
 								<th
-									class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									class="cursor-pointer px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200"
 									on:click={() => toggleSortModel('messages')}>{$i18n.t('Messages')}</th
 								>
 								<th
-									class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									class="cursor-pointer px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200"
 									on:click={() => toggleSortModel('tokens')}>{$i18n.t('Tokens')}</th
 								>
 								<th
-									class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									class="cursor-pointer px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200"
 									on:click={() => toggleSortModel('share_percent')}>{$i18n.t('Usage Share')}</th
 								>
 							</tr>
@@ -1043,21 +1221,92 @@
 			</div>
 		</div>
 
-		<div
-			class="flex-1 rounded-[12px] bg-white dark:bg-gray-900 shadow-[0_1px_4px_rgba(0,0,0,0.08)] border border-gray-100 dark:border-gray-800 p-4"
-		>
-			<div class="flex items-center justify-between mb-3">
-				<h2 class="text-base font-semibold text-gray-900 dark:text-white">
-					{$i18n.t('User Activity')}
-				</h2>
-				<button
-					type="button"
-					class="text-gray-400 hover:text-gray-600 p-1"
-					aria-label={$i18n.t('Expand')}
-					on:click={() => (userModalOpen = true)}
-				>
-					<ArrowsPointingOut className="size-4" />
-				</button>
+		<div class="min-w-0 flex flex-col">
+			<div class="mb-3 flex min-h-[2.25rem] items-center justify-between gap-2 min-w-0">
+				<h3 class="min-w-0 flex-1 truncate pr-2 text-base font-semibold text-gray-900 dark:text-white">
+					{$i18n.t('User Activity Table')}
+				</h3>
+				<div class="flex shrink-0 items-center gap-0.5">
+					<button
+						type="button"
+						class="text-gray-400 hover:text-gray-600 p-1"
+						aria-label={$i18n.t('Expand')}
+						on:click={() => (userModalOpen = true)}
+					>
+						<ArrowsPointingOut className="size-4" />
+					</button>
+					<div class="relative shrink-0" data-dropdown="table-export">
+						<button
+							type="button"
+							title={$i18n.t('Export Data')}
+							aria-label={$i18n.t('Export Data')}
+							disabled={tableExporting}
+							class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-transparent text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+							on:click|stopPropagation={() => (tableExportOpen = !tableExportOpen)}
+						>
+							{#if tableExporting}
+								<div class="h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent" />
+							{:else}
+								<Download className="size-4" />
+							{/if}
+						</button>
+						{#if tableExportOpen}
+							<div
+								class="absolute right-0 top-full mt-2 z-50 w-max max-w-[min(260px,calc(100vw-3rem))] rounded-lg border border-gray-200 bg-white py-1 shadow-md dark:border-gray-700 dark:bg-gray-850"
+							>
+								<div class="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+									{$i18n.t('Model Usage Table')}
+								</div>
+								<button
+									type="button"
+									disabled={tableExporting}
+									class="block w-full whitespace-normal px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40"
+									on:click|stopPropagation={() => handleTableExport('model-usage', 'pdf')}
+									>{$i18n.t('Export Model Usage as PDF')}</button
+								>
+								<button
+									type="button"
+									disabled={tableExporting}
+									class="block w-full whitespace-normal px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40"
+									on:click|stopPropagation={() => handleTableExport('model-usage', 'csv')}
+									>{$i18n.t('Export Model Usage as CSV')}</button
+								>
+								<button
+									type="button"
+									disabled={tableExporting}
+									class="block w-full whitespace-normal px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40"
+									on:click|stopPropagation={() => handleTableExport('model-usage', 'xlsx')}
+									>{$i18n.t('Export Model Usage as Excel')}</button
+								>
+								<div class="my-1 border-t border-gray-100 dark:border-gray-700"></div>
+								<div class="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+									{$i18n.t('User Activity Table')}
+								</div>
+								<button
+									type="button"
+									disabled={tableExporting}
+									class="block w-full whitespace-normal px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40"
+									on:click|stopPropagation={() => handleTableExport('user-activity', 'pdf')}
+									>{$i18n.t('Export User Activity as PDF')}</button
+								>
+								<button
+									type="button"
+									disabled={tableExporting}
+									class="block w-full whitespace-normal px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40"
+									on:click|stopPropagation={() => handleTableExport('user-activity', 'csv')}
+									>{$i18n.t('Export User Activity as CSV')}</button
+								>
+								<button
+									type="button"
+									disabled={tableExporting}
+									class="block w-full whitespace-normal px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40"
+									on:click|stopPropagation={() => handleTableExport('user-activity', 'xlsx')}
+									>{$i18n.t('Export User Activity as Excel')}</button
+								>
+							</div>
+						{/if}
+					</div>
+				</div>
 			</div>
 			<div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
 				<div class="max-h-[280px] overflow-x-auto overflow-y-auto">
@@ -1075,19 +1324,19 @@
 							<tr>
 								<th class="px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200">#</th>
 								<th
-									class="min-w-0 px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									class="min-w-0 cursor-pointer px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200"
 									on:click={() => toggleSortUser('user')}>{$i18n.t('User')}</th
 								>
 								<th
-									class="px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									class="cursor-pointer px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200"
 									on:click={() => toggleSortUser('role')}>{$i18n.t('Role')}</th
 								>
 								<th
-									class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									class="cursor-pointer px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200"
 									on:click={() => toggleSortUser('messages')}>{$i18n.t('Messages')}</th
 								>
 								<th
-									class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									class="cursor-pointer px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200"
 									on:click={() => toggleSortUser('tokens')}>{$i18n.t('Tokens')}</th
 								>
 							</tr>
@@ -1118,6 +1367,7 @@
 					</table>
 				</div>
 			</div>
+		</div>
 		</div>
 	</div>
 

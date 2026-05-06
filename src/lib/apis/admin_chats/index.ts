@@ -16,13 +16,12 @@ export type AdminChatRow = {
 	message_count: number;
 	created_at: number;
 	updated_at: number;
-	is_flagged: boolean;
 	tags: string[];
 };
 
 export type AdminChatStats = {
-	total_chats: number;
-	flagged_chats: number;
+	total_documents: number;
+	flagged_documents: number;
 };
 
 export type AdminMessageRow = {
@@ -52,8 +51,24 @@ async function adminFetch<T>(
 	return res.json();
 }
 
-export async function getAdminChatStats(token: string): Promise<AdminChatStats> {
-	return adminFetch<AdminChatStats>(token, '/stats');
+export async function getAdminChatStats(
+	token: string,
+	params?: {
+		user_id?: string;
+		model_id?: string;
+		tag?: string;
+		start_date?: string;
+		end_date?: string;
+	}
+): Promise<AdminChatStats> {
+	const sp = new URLSearchParams();
+	if (params?.user_id) sp.set('user_id', params.user_id);
+	if (params?.model_id) sp.set('model_id', params.model_id);
+	if (params?.tag) sp.set('tag', params.tag);
+	if (params?.start_date) sp.set('start_date', params.start_date);
+	if (params?.end_date) sp.set('end_date', params.end_date);
+	const q = sp.toString();
+	return adminFetch<AdminChatStats>(token, q ? `/stats?${q}` : '/stats');
 }
 
 export async function getAdminChats(
@@ -85,25 +100,4 @@ export async function getAdminChatMessages(
 	chatId: string
 ): Promise<AdminMessageRow[]> {
 	return adminFetch<AdminMessageRow[]>(token, `/${encodeURIComponent(chatId)}/messages`);
-}
-
-export async function patchAdminChatFlag(
-	token: string,
-	chatId: string,
-	flagged: boolean
-): Promise<{ ok: boolean }> {
-	const res = await fetch(
-		`${WEBUI_API_BASE_URL}/admin/chats/${encodeURIComponent(chatId)}/flag`,
-		{
-			method: 'PATCH',
-			headers: {
-				Accept: 'application/json',
-				'Content-Type': 'application/json',
-				authorization: `Bearer ${token}`
-			},
-			body: JSON.stringify({ flagged })
-		}
-	);
-	if (!res.ok) throw await res.json();
-	return res.json();
 }
