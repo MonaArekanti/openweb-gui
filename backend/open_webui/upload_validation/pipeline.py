@@ -44,9 +44,9 @@ def validate_upload_buffer(
     """
     Run validation pipeline when enabled via config / env.
 
-    Strict order (metadata before content — content scan never runs if step 1 rejects):
-      1. Filename substrings (immediate; no document parsing).
-      2. Embedded document metadata blob (PDF/DOCX/PPTX tags only — no body extract).
+    Strict order (metadata before content; content never runs if metadata phase rejects):
+      1. Embedded document metadata blob (PDF/DOCX/PPTX tags only — no body extract).
+      2. Filename substrings (no full document body read).
       3. Document body text extraction + scan (only if steps 1–2 passed).
     """
     enabled = bool(getattr(request.app.state.config, "UPLOAD_SENSITIVITY_VALIDATION_ENABLED", False))
@@ -62,14 +62,6 @@ def validate_upload_buffer(
     rules = _rules_for_request(request)
 
     try:
-        fn_hit = scan_filename(filename, rules)
-        if fn_hit:
-            log.warning("Upload rejected (filename): %s", fn_hit)
-            return ValidationResult(False, "filename", fn_hit)
-    except Exception as e:
-        log.debug("Filename scan error: %s", e)
-
-    try:
         meta_pkg = extract_metadata(filename, content_type, data)
         blob = meta_pkg.get("text_blob") or ""
         hit = scan_metadata_blob(blob, rules)
@@ -78,6 +70,14 @@ def validate_upload_buffer(
             return ValidationResult(False, "metadata", hit)
     except Exception as e:
         log.debug("Metadata extraction skipped/failed: %s", e)
+
+    try:
+        fn_hit = scan_filename(filename, rules)
+        if fn_hit:
+            log.warning("Upload rejected (filename): %s", fn_hit)
+            return ValidationResult(False, "filename", fn_hit)
+    except Exception as e:
+        log.debug("Filename scan error: %s", e)
 
     try:
         text, extract_err = extract_document_text(filename, content_type, data)

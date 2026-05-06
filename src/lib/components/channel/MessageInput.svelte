@@ -13,7 +13,8 @@
 	import RichTextInput from '../common/RichTextInput.svelte';
 	import VoiceRecording from '../chat/MessageInput/VoiceRecording.svelte';
 	import InputMenu from './MessageInput/InputMenu.svelte';
-	import { uploadFile, getUploadErrorMessage } from '$lib/apis/files';
+	import { uploadFile, getUploadErrorMessage, isUploadSensitiveBlockedError } from '$lib/apis/files';
+	import { sensitiveUploadBlockedModalOpen } from '$lib/stores';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import FileItem from '../common/FileItem.svelte';
 	import Image from '../common/Image.svelte';
@@ -204,8 +205,12 @@
 				files = files.filter((item) => item?.itemId !== tempItemId);
 			}
 		} catch (e) {
-			toast.error(getUploadErrorMessage(e, $i18n.t));
 			files = files.filter((item) => item?.itemId !== tempItemId);
+			if (isUploadSensitiveBlockedError(e)) {
+				sensitiveUploadBlockedModalOpen.set(true);
+			} else {
+				toast.error(getUploadErrorMessage(e, $i18n.t));
+			}
 		}
 	};
 

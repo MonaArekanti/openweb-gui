@@ -4,8 +4,13 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { getOllamaConfig, updateOllamaConfig } from '$lib/apis/ollama';
-	import { getOpenAIConfig, updateOpenAIConfig, getOpenAIModels } from '$lib/apis/openai';
+	import { getOllamaConfig, updateOllamaConfig, verifyOllamaConnection } from '$lib/apis/ollama';
+	import {
+		getOpenAIConfig,
+		updateOpenAIConfig,
+		getOpenAIModels,
+		verifyOpenAIConnection
+	} from '$lib/apis/openai';
 	import { getModels as _getModels } from '$lib/apis';
 
 	import { models, user } from '$lib/stores';
@@ -41,6 +46,42 @@
 	let showAddOpenAIConnectionModal = false;
 	let showAddOllamaConnectionModal = false;
 
+	let openaiReach: (boolean | null)[] = [];
+	let ollamaReach: (boolean | null)[] = [];
+
+	async function pingOpenAI() {
+		if (!ENABLE_OPENAI_API) return;
+		openaiReach = OPENAI_API_BASE_URLS.map(() => null);
+		await Promise.all(
+			OPENAI_API_BASE_URLS.map(async (u, i) => {
+				try {
+					await verifyOpenAIConnection(localStorage.token, u, OPENAI_API_KEYS[i] ?? '');
+					openaiReach[i] = true;
+				} catch {
+					openaiReach[i] = false;
+				}
+			})
+		);
+		openaiReach = [...openaiReach];
+	}
+
+	async function pingOllama() {
+		if (!ENABLE_OLLAMA_API) return;
+		ollamaReach = OLLAMA_BASE_URLS.map(() => null);
+		await Promise.all(
+			OLLAMA_BASE_URLS.map(async (u, i) => {
+				try {
+					const cfg = OLLAMA_API_CONFIGS[u] || {};
+					await verifyOllamaConnection(localStorage.token, u, cfg.key ?? '');
+					ollamaReach[i] = true;
+				} catch {
+					ollamaReach[i] = false;
+				}
+			})
+		);
+		ollamaReach = [...ollamaReach];
+	}
+
 	const updateOpenAIHandler = async () => {
 		if (ENABLE_OPENAI_API !== null) {
 			OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS.filter(
@@ -75,6 +116,7 @@
 			if (res) {
 				toast.success($i18n.t('OpenAI API settings updated'));
 				await models.set(await getModels());
+				await pingOpenAI();
 			}
 		}
 	};
@@ -104,6 +146,7 @@
 			if (res) {
 				toast.success($i18n.t('Ollama API settings updated'));
 				await models.set(await getModels());
+				await pingOllama();
 			}
 		}
 	};
@@ -173,6 +216,9 @@
 					}
 				}
 			}
+
+			await pingOpenAI();
+			await pingOllama();
 		}
 	});
 </script>
@@ -200,60 +246,91 @@
 	<div class=" overflow-y-scroll scrollbar-hidden h-full">
 		{#if ENABLE_OPENAI_API !== null && ENABLE_OLLAMA_API !== null}
 			<div class="my-2">
-				<div class="mt-2 space-y-2 pr-1.5">
-					<div class="flex justify-between items-center text-sm">
-						<div class="  font-medium">{$i18n.t('OpenAI API')}</div>
+				<div class="mt-2 space-y-4 pr-1.5">
+					<div class="flex justify-between items-center">
+						<div class="text-base font-bold text-gray-900 dark:text-white">
+							{$i18n.t('OpenAI API')}
+						</div>
 
 						<div class="flex items-center">
-							<div class="">
-								<Switch
-									bind:state={ENABLE_OPENAI_API}
-									on:change={async () => {
-										updateOpenAIHandler();
-									}}
-								/>
-							</div>
+							<Switch
+								bind:state={ENABLE_OPENAI_API}
+								on:change={async () => {
+									await updateOpenAIHandler();
+								}}
+							/>
 						</div>
 					</div>
 
 					{#if ENABLE_OPENAI_API}
-						<hr class=" border-gray-50 dark:border-gray-850" />
-
-						<div class="">
-							<div class="flex justify-between items-center">
-								<div class="font-medium">{$i18n.t('Manage OpenAI API Connections')}</div>
+						<div>
+							<div class="flex justify-between items-center mb-2">
+								<div class="text-sm font-medium text-gray-700 dark:text-gray-300">
+									{$i18n.t('Manage OpenAI API Connections')}
+								</div>
 
 								<Tooltip content={$i18n.t(`Add Connection`)}>
 									<button
-										class="px-1"
+										class="p-1 text-xl leading-none text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition rounded-md"
 										on:click={() => {
 											showAddOpenAIConnectionModal = true;
 										}}
 										type="button"
+										aria-label={$i18n.t('Add Connection')}
 									>
 										<Plus />
 									</button>
 								</Tooltip>
 							</div>
 
-							<div class="flex flex-col gap-1.5 mt-1.5">
-								{#each OPENAI_API_BASE_URLS as url, idx}
-									<OpenAIConnection
-										pipeline={pipelineUrls[url] ? true : false}
-										bind:url
-										bind:key={OPENAI_API_KEYS[idx]}
-										bind:config={OPENAI_API_CONFIGS[url]}
-										onSubmit={() => {
-											updateOpenAIHandler();
-										}}
-										onDelete={() => {
-											OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS.filter(
-												(url, urlIdx) => idx !== urlIdx
-											);
-											OPENAI_API_KEYS = OPENAI_API_KEYS.filter((key, keyIdx) => idx !== keyIdx);
-										}}
-									/>
-								{/each}
+							<div
+								class="rounded-lg border border-[#e0e0e0] bg-white dark:border-gray-600 dark:bg-gray-900 overflow-hidden"
+							>
+								<table class="w-full table-fixed border-collapse text-sm">
+									<colgroup>
+										<col />
+										<col style="width: 148px" />
+										<col style="width: 104px" />
+									</colgroup>
+									<thead>
+										<tr class="border-b border-[#e0e0e0] bg-white dark:border-gray-700 dark:bg-gray-900">
+											<th
+												class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
+												scope="col">{$i18n.t('Connection URL')}</th
+											>
+											<th
+												class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
+												scope="col">{$i18n.t('Status')}</th
+											>
+											<th
+												class="align-middle px-4 py-3 text-right text-[13px] font-bold text-gray-900 dark:text-white"
+												scope="col">{$i18n.t('Actions')}</th
+											>
+										</tr>
+									</thead>
+									<tbody>
+										{#each OPENAI_API_BASE_URLS as url, idx}
+											<OpenAIConnection
+												pipeline={pipelineUrls[url] ? true : false}
+												bind:url
+												bind:key={OPENAI_API_KEYS[idx]}
+												bind:config={OPENAI_API_CONFIGS[url]}
+												reachable={openaiReach[idx] ?? null}
+												onSubmit={() => {
+													updateOpenAIHandler();
+												}}
+												onDelete={() => {
+													OPENAI_API_BASE_URLS = OPENAI_API_BASE_URLS.filter(
+														(url, urlIdx) => idx !== urlIdx
+													);
+													OPENAI_API_KEYS = OPENAI_API_KEYS.filter(
+														(key, keyIdx) => idx !== keyIdx
+													);
+												}}
+											/>
+										{/each}
+									</tbody>
+								</table>
 							</div>
 						</div>
 					{/if}
@@ -263,63 +340,100 @@
 			<hr class=" border-gray-50 dark:border-gray-850" />
 
 			<div class="pr-1.5 my-2">
-				<div class="flex justify-between items-center text-sm mb-2">
-					<div class="  font-medium">{$i18n.t('Ollama API')}</div>
-
-					<div class="mt-1">
-						<Switch
-							bind:state={ENABLE_OLLAMA_API}
-							on:change={async () => {
-								updateOllamaHandler();
-							}}
-						/>
+				<div class="flex justify-between items-center mb-4">
+					<div class="text-base font-bold text-gray-900 dark:text-white">
+						{$i18n.t('Ollama API')}
 					</div>
+
+					<Switch
+						bind:state={ENABLE_OLLAMA_API}
+						on:change={async () => {
+							await updateOllamaHandler();
+						}}
+					/>
 				</div>
 
 				{#if ENABLE_OLLAMA_API}
-					<hr class=" border-gray-50 dark:border-gray-850 my-2" />
-
-					<div class="">
-						<div class="flex justify-between items-center">
-							<div class="font-medium">{$i18n.t('Manage Ollama API Connections')}</div>
+					<div>
+						<div class="flex justify-between items-center mb-2">
+							<div class="text-sm font-medium text-gray-700 dark:text-gray-300">
+								{$i18n.t('Manage Ollama API Connections')}
+							</div>
 
 							<Tooltip content={$i18n.t(`Add Connection`)}>
 								<button
-									class="px-1"
+									class="p-1 text-xl leading-none text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition rounded-md"
 									on:click={() => {
 										showAddOllamaConnectionModal = true;
 									}}
 									type="button"
+									aria-label={$i18n.t('Add Connection')}
 								>
 									<Plus />
 								</button>
 							</Tooltip>
 						</div>
 
-						<div class="flex w-full gap-1.5">
-							<div class="flex-1 flex flex-col gap-1.5 mt-1.5">
-								{#each OLLAMA_BASE_URLS as url, idx}
-									<OllamaConnection
-										bind:url
-										bind:config={OLLAMA_API_CONFIGS[url]}
-										{idx}
-										onSubmit={() => {
-											updateOllamaHandler();
-										}}
-										onDelete={() => {
-											OLLAMA_BASE_URLS = OLLAMA_BASE_URLS.filter((url, urlIdx) => idx !== urlIdx);
-										}}
-									/>
-								{/each}
-							</div>
+						<div
+							class="rounded-lg border border-[#e0e0e0] bg-white dark:border-gray-600 dark:bg-gray-900 overflow-hidden"
+						>
+							<table class="w-full table-fixed border-collapse text-sm">
+								<colgroup>
+									<col />
+									<col style="width: 148px" />
+									<col style="width: 184px" />
+								</colgroup>
+								<thead>
+									<tr class="border-b border-[#e0e0e0] bg-white dark:border-gray-700 dark:bg-gray-900">
+										<th
+											class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
+											scope="col">{$i18n.t('Connection URL')}</th
+										>
+										<th
+											class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
+											scope="col">{$i18n.t('Status')}</th
+										>
+										<th
+											class="align-middle px-4 py-3 text-right text-[13px] font-bold text-gray-900 dark:text-white"
+											scope="col">{$i18n.t('Actions')}</th
+										>
+									</tr>
+								</thead>
+								<tbody>
+									{#each OLLAMA_BASE_URLS as url, idx}
+										<OllamaConnection
+											bind:url
+											bind:config={OLLAMA_API_CONFIGS[url]}
+											reachable={ollamaReach[idx] ?? null}
+											onMigrateUrl={(from, to) => {
+												const cfg = OLLAMA_API_CONFIGS[from];
+												if (cfg !== undefined) {
+													OLLAMA_API_CONFIGS[to] = cfg;
+													delete OLLAMA_API_CONFIGS[from];
+													OLLAMA_API_CONFIGS = { ...OLLAMA_API_CONFIGS };
+												}
+											}}
+											onSubmit={() => {
+												updateOllamaHandler();
+											}}
+											onDelete={() => {
+												OLLAMA_BASE_URLS = OLLAMA_BASE_URLS.filter(
+													(url, urlIdx) => idx !== urlIdx
+												);
+											}}
+										/>
+									{/each}
+								</tbody>
+							</table>
 						</div>
 
-						<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+						<div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
 							{$i18n.t('Trouble accessing Ollama?')}
 							<a
-								class=" text-gray-300 font-medium underline"
+								class="font-medium text-[#2EC4B6] underline hover:text-[#26b0a5]"
 								href="https://github.com/open-webui/open-webui#troubleshooting"
 								target="_blank"
+								rel="noopener noreferrer"
 							>
 								{$i18n.t('Click here for help.')}
 							</a>

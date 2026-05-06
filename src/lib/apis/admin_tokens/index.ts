@@ -3,6 +3,7 @@ import { WEBUI_API_BASE_URL } from '$lib/constants';
 export type TokensSummary = {
 	total_tokens: number;
 	total_estimated_cost_usd: number;
+	has_missing_connection_prices: boolean;
 	avg_tokens_per_message: number;
 	rate_per_token_usd: number;
 };
@@ -24,9 +25,10 @@ export type ModelBarRow = {
 export type BreakdownRow = {
 	model_id: string;
 	model_name: string;
+	connection_url?: string | null;
 	total_tokens: number;
-	price_per_1k_usd: number;
-	total_cost_usd: number;
+	price_per_1k_usd?: number | null;
+	total_cost_usd?: number | null;
 };
 
 export type TokenBreakdownResponse = {

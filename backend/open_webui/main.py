@@ -52,6 +52,7 @@ from open_webui.socket.main import (
 from open_webui.routers import (
     admin_chats,
     analytics,
+    connections as connections_router,
     tokens as tokens_router,
     audio,
     images,
@@ -351,6 +352,10 @@ https://github.com/open-webui/open-webui
 async def lifespan(app: FastAPI):
     if RESET_CONFIG_ON_START:
         reset_config()
+
+    from open_webui.models.sensitive_upload_event import ensure_sensitive_upload_table
+
+    ensure_sensitive_upload_table()
 
     asyncio.create_task(periodic_usage_pool_cleanup())
     yield
@@ -772,6 +777,12 @@ app.include_router(
 
 app.include_router(
     tokens_router.router, prefix="/api/v1/admin/tokens", tags=["admin-tokens"]
+)
+
+app.include_router(
+    connections_router.router,
+    prefix="/api/v1/admin/connections",
+    tags=["admin-connections"],
 )
 
 app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])

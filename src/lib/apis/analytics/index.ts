@@ -6,6 +6,9 @@ export type AnalyticsSummary = {
 	chats: number;
 	users: number;
 	estimated_cost: number;
+	sensitive_upload_blocks_total: number;
+	sensitive_upload_blocks_metadata: number;
+	sensitive_upload_blocks_content: number;
 };
 
 export type UsageOverTimeRow = {

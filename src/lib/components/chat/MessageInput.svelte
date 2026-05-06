@@ -21,7 +21,8 @@
 
 	import { blobToFile, compressImage, createMessagesList, findWordIndices } from '$lib/utils';
 	import { transcribeAudio } from '$lib/apis/audio';
-	import { uploadFile, getUploadErrorMessage } from '$lib/apis/files';
+	import { uploadFile, getUploadErrorMessage, isUploadSensitiveBlockedError } from '$lib/apis/files';
+	import { sensitiveUploadBlockedModalOpen } from '$lib/stores';
 	import { getTools } from '$lib/apis/tools';
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
@@ -211,8 +212,12 @@
 				files = files.filter((item) => item?.itemId !== tempItemId);
 			}
 		} catch (e) {
-			toast.error(getUploadErrorMessage(e, $i18n.t));
 			files = files.filter((item) => item?.itemId !== tempItemId);
+			if (isUploadSensitiveBlockedError(e)) {
+				sensitiveUploadBlockedModalOpen.set(true);
+			} else {
+				toast.error(getUploadErrorMessage(e, $i18n.t));
+			}
 		}
 	};
 

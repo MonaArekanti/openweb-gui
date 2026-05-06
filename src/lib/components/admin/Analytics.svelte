@@ -3,6 +3,7 @@
 	import dayjs from 'dayjs';
 	import utc from 'dayjs/plugin/utc';
 	import { Chart, registerables } from 'chart.js';
+	import * as XLSX from 'xlsx';
 
 	import {
 		getAnalyticsSummary,
@@ -37,6 +38,51 @@
 		'#1D3557',
 		'#999999'
 	];
+
+	const PIE_TOP_N = 8;
+
+	type PieSliceRow = {
+		label: string;
+		messages: number;
+		tokens: number;
+		sharePercent: number;
+	};
+
+	/** Pie shows top N models by message volume; remaining rows merge into "Others". */
+	function computePieSlices(rows: ModelUsageRow[], othersLabel: string): PieSliceRow[] {
+		if (rows.length === 0) return [];
+		const totalMsgs = rows.reduce((s, r) => s + r.messages, 0);
+		const sorted = [...rows].sort((a, b) => b.messages - a.messages);
+		const pct = (m: number) => (totalMsgs > 0 ? (m / totalMsgs) * 100 : 0);
+		if (sorted.length <= PIE_TOP_N) {
+			return sorted.map((r) => ({
+				label: r.model,
+				messages: r.messages,
+				tokens: r.tokens,
+				sharePercent: pct(r.messages)
+			}));
+		}
+		const top = sorted.slice(0, PIE_TOP_N);
+		const rest = sorted.slice(PIE_TOP_N);
+		const othersMessages = rest.reduce((s, r) => s + r.messages, 0);
+		const othersTokens = rest.reduce((s, r) => s + r.tokens, 0);
+		return [
+			...top.map((r) => ({
+				label: r.model,
+				messages: r.messages,
+				tokens: r.tokens,
+				sharePercent: pct(r.messages)
+			})),
+			{
+				label: othersLabel,
+				messages: othersMessages,
+				tokens: othersTokens,
+				sharePercent: pct(othersMessages)
+			}
+		];
+	}
+
+	let pieSlices: PieSliceRow[] = [];
 
 	let summary: AnalyticsSummary | null = null;
 	let summaryLoading = true;
@@ -317,8 +363,6 @@
 			]);
 			modelUsageRows = mu;
 			userActivityRows = ua;
-			await tick();
-			buildPieChart();
 		} catch (e: any) {
 			tablesError = e?.detail?.detail ?? e?.detail ?? 'Failed to load';
 			modelUsageRows = [];
@@ -326,6 +370,10 @@
 		} finally {
 			tablesLoading = false;
 		}
+		// Pie canvas only mounts after loading finishes — build chart after DOM shows it.
+		await tick();
+		await tick();
+		buildPieChart();
 	}
 
 	async function loadUsersAndModels() {
@@ -371,12 +419,14 @@
 	function buildPieChart() {
 		if (!pieCanvas || modelUsageRows.length === 0) {
 			destroyPie();
+			pieSlices = [];
 			return;
 		}
 		destroyPie();
-		const labels = modelUsageRows.map((r) => r.model);
-		const data = modelUsageRows.map((r) => r.messages);
-		const colors = modelUsageRows.map((_, i) => PALETTE[i % PALETTE.length]);
+		pieSlices = computePieSlices(modelUsageRows, $i18n.t('Others'));
+		const labels = pieSlices.map((s) => s.label);
+		const data = pieSlices.map((s) => s.messages);
+		const colors = pieSlices.map((_, i) => PALETTE[i % PALETTE.length]);
 
 		pieChart = new Chart(pieCanvas.getContext('2d')!, {
 			type: 'pie',
@@ -394,6 +444,7 @@
 			options: {
 				responsive: true,
 				maintainAspectRatio: false,
+				layout: { padding: 4 },
 				animation: { duration: 400 },
 				plugins: {
 					legend: { display: false },
@@ -402,27 +453,29 @@
 						padding: 10,
 						titleFont: { size: 13, weight: '600' },
 						bodyFont: { size: 12 },
+						displayColors: false,
 						callbacks: {
 							title: (items) => {
 								const i = items[0]?.dataIndex ?? 0;
-								return modelUsageRows[i]?.model ?? '';
+								return pieSlices[i]?.label ?? '';
 							},
 							label: (ctx) => {
 								const i = ctx.dataIndex ?? 0;
-								const row = modelUsageRows[i];
+								const row = pieSlices[i];
 								if (!row) return '';
-								const lines = [
+								const share = row.sharePercent.toFixed(1);
+								return [
 									`${$i18n.t('Messages')}: ${row.messages.toLocaleString()}`,
 									`${$i18n.t('Tokens')}: ${row.tokens.toLocaleString()}`,
-									`${$i18n.t('Share')}: ${row.share_percent}%`
+									`${$i18n.t('Share')}: ${share}%`
 								];
-								return lines.join('\n');
 							}
 						}
 					}
 				}
 			}
 		});
+		requestAnimationFrame(() => pieChart?.resize());
 	}
 
 	function buildLineChart() {
@@ -463,8 +516,11 @@
 				backgroundColor: colorForModel(mid),
 				tension: lineSmooth ? 0.35 : 0,
 				fill: false,
-				pointRadius: 2,
-				pointHoverRadius: 4,
+				pointRadius: 0,
+				pointHoverRadius: 0,
+				pointBorderWidth: 0,
+				pointBackgroundColor: 'transparent',
+				pointBorderColor: 'transparent',
 				borderWidth: 2
 			};
 		});
@@ -481,9 +537,7 @@
 				interaction: { mode: 'index', intersect: false },
 				plugins: {
 					legend: {
-						display: modelIds.length > 1,
-						position: 'bottom',
-						labels: { boxWidth: 12, font: { size: 11 } }
+						display: false
 					},
 					tooltip: {
 						mode: 'index',
@@ -492,6 +546,11 @@
 				},
 				scales: {
 					x: {
+						ticks: {
+							maxRotation: 0,
+							autoSkip: true,
+							maxTicksLimit: 12
+						},
 						title: {
 							display: true,
 							text: $i18n.t('Date'),
@@ -591,6 +650,38 @@
 		exportOpen = false;
 	}
 
+	function modelDisplayName(modelId: string) {
+		const labelRow = enabledModels.find((m) => m.id === modelId);
+		return (
+			labelRow?.name ??
+			modelUsageRows.find((r) => r.model_id === modelId)?.model ??
+			modelId
+		);
+	}
+
+	function exportLineExcel() {
+		const { start, end } = dateRange();
+		const days = eachDayInclusive(start, end);
+		const modelIds = selectedModelId
+			? [selectedModelId]
+			: Array.from(new Set(lineRaw.map((r) => r.model))).sort();
+		const byDate = new Map<string, Map<string, number>>();
+		for (const row of lineRaw) {
+			if (!byDate.has(row.date)) byDate.set(row.date, new Map());
+			byDate.get(row.date)!.set(row.model, row.count);
+		}
+		const header = ['Date', ...modelIds.map((id) => modelDisplayName(id))];
+		const rows: (string | number)[][] = [header];
+		for (const d of days) {
+			rows.push([d, ...modelIds.map((m) => byDate.get(d)?.get(m) ?? 0)]);
+		}
+		const ws = XLSX.utils.aoa_to_sheet(rows);
+		const wb = XLSX.utils.book_new();
+		XLSX.utils.book_append_sheet(wb, ws, 'Usage');
+		XLSX.writeFile(wb, `analytics-line-${start}_${end}.xlsx`);
+		exportOpen = false;
+	}
+
 	function onDocClick(ev: MouseEvent) {
 		const t = ev.target as HTMLElement;
 		if (!t.closest?.('[data-dropdown="calendar"]')) showCalendar = false;
@@ -653,133 +744,155 @@
 				{$i18n.t('users')}
 				· US${fmtUsd(summary.estimated_cost)}
 				({$i18n.t('Est. cost')})
+				· {(summary.sensitive_upload_blocks_total ?? 0).toLocaleString()}
+				{$i18n.t('blocked sensitive uploads')}
+				({$i18n.t('Metadata')}: {(summary.sensitive_upload_blocks_metadata ?? 0).toLocaleString()},
+				{$i18n.t('Content')}: {(summary.sensitive_upload_blocks_content ?? 0).toLocaleString()})
 			</p>
 		</div>
 	{/if}
 
-	<div class="flex flex-wrap items-center justify-end gap-2 relative z-20">
-		<select
-			class="analytics-select"
-			bind:value={selectedUserId}
-			on:change={() => loadLineData()}
-			aria-label={$i18n.t('All Users')}
-		>
-			<option value="">{$i18n.t('All Users')}</option>
-			{#each adminUsers as u}
-				<option value={u.id}>{u.name}</option>
-			{/each}
-		</select>
-
-		<select
-			class="analytics-select min-w-[140px]"
-			bind:value={selectedModelId}
-			on:change={() => loadLineData()}
-			aria-label={$i18n.t('All Models')}
-		>
-			<option value="">{$i18n.t('All Models')}</option>
-			{#each enabledModels as m}
-				<option value={m.id}>{m.name}</option>
-			{/each}
-		</select>
-
-		<select class="analytics-select" bind:value={metric} on:change={() => loadLineData()}>
-			<option value="messages">{$i18n.t('Messages')}</option>
-			<option value="tokens">{$i18n.t('Tokens')}</option>
-		</select>
-
-		<div class="relative" data-dropdown="calendar">
-			<select
-				class="analytics-select min-w-[160px]"
-				bind:value={timePreset}
-				on:change={() => {
-					if (timePreset === 'custom') {
-						showCalendar = true;
-					} else {
-						showCalendar = false;
-						loadLineData();
-					}
-				}}
-			>
-				<option value="7">{$i18n.t('Last 7 Days')}</option>
-				<option value="20">{$i18n.t('Last 20 Days')}</option>
-				<option value="30">{$i18n.t('Last 30 Days')}</option>
-				<option value="all">{$i18n.t('All Time')}</option>
-				<option value="custom">{$i18n.t('Custom Range')} →</option>
-			</select>
-
-			{#if showCalendar && timePreset === 'custom'}
-				<div
-					class="absolute right-0 mt-2 z-50 bg-white dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 w-[260px] text-sm"
-				>
-					<div class="flex flex-col gap-2">
-						<label class="flex flex-col gap-1">
-							<span class="text-gray-500 text-xs">{$i18n.t('Start Date')}</span>
-							<input type="date" class="analytics-select py-1" bind:value={customStart} />
-						</label>
-						<label class="flex flex-col gap-1">
-							<span class="text-gray-500 text-xs">{$i18n.t('End Date')}</span>
-							<input type="date" class="analytics-select py-1" bind:value={customEnd} />
-						</label>
-						<div class="flex justify-end gap-2 mt-2">
-							<button
-								type="button"
-								class="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600"
-								on:click={() => {
-									showCalendar = false;
-								}}>{$i18n.t('Cancel')}</button
-							>
-							<button
-								type="button"
-								disabled={calendarApplyInvalid || !customStart || !customEnd}
-								class="px-3 py-1.5 rounded-lg bg-gray-900 text-white dark:bg-white dark:text-gray-900 disabled:opacity-40"
-								on:click={() => {
-									if (calendarApplyInvalid) return;
-									showCalendar = false;
-									loadLineData();
-								}}>{$i18n.t('Apply')}</button
-							>
-						</div>
-					</div>
-				</div>
-			{/if}
-		</div>
-
-		<div class="relative" data-dropdown="export">
-			<button
-				type="button"
-				class="analytics-select inline-flex items-center gap-2"
-				on:click|stopPropagation={() => (exportOpen = !exportOpen)}
-			>
-				<Download className="size-4 shrink-0" />
-				<span>{$i18n.t('Export')}</span>
-				<svg class="size-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20"
-					><path
-						d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.24 4.5a.75.75 0 01-1.08 0l-4.24-4.5a.75.75 0 01.02-1.06z"
-					/></svg
-				>
-			</button>
-			{#if exportOpen}
-				<div
-					class="absolute right-0 mt-1 z-50 bg-white dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg shadow-md py-1 min-w-[160px]"
-				>
-					<button
-						type="button"
-						class="block w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm"
-						on:click|stopPropagation={() => exportLineCsv()}>{$i18n.t('Export as CSV')}</button
-					>
-					<button
-						type="button"
-						class="block w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm"
-						on:click|stopPropagation={() => exportLinePng()}>{$i18n.t('Export as PNG')}</button
-					>
-				</div>
-			{/if}
-		</div>
-	</div>
-
 	<div
 		class="rounded-[12px] bg-white dark:bg-gray-900 shadow-[0_1px_4px_rgba(0,0,0,0.08)] border border-gray-100 dark:border-gray-800 overflow-hidden"
 	>
+		<!-- Compact filters: same horizontal band as the line chart (70% column on lg) -->
+		<div class="flex border-b border-gray-100 dark:border-gray-800 bg-[#fafafa]/40 dark:bg-gray-850/20">
+			<div
+				class="hidden lg:block lg:w-[30%] shrink-0 border-r border-gray-100 dark:border-gray-800"
+				aria-hidden="true"
+			></div>
+			<div
+				class="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5 px-4 py-2 lg:w-[70%] lg:px-6 relative z-20"
+			>
+				<select
+					class="analytics-select analytics-filter-inline"
+					bind:value={selectedUserId}
+					on:change={() => loadLineData()}
+					aria-label={$i18n.t('All Users')}
+				>
+					<option value="">{$i18n.t('All Users')}</option>
+					{#each adminUsers as u}
+						<option value={u.id}>{u.name}</option>
+					{/each}
+				</select>
+
+				<select
+					class="analytics-select analytics-filter-inline"
+					bind:value={selectedModelId}
+					on:change={() => loadLineData()}
+					aria-label={$i18n.t('All Models')}
+				>
+					<option value="">{$i18n.t('All Models')}</option>
+					{#each enabledModels as m}
+						<option value={m.id}>{m.name}</option>
+					{/each}
+				</select>
+
+				<select
+					class="analytics-select analytics-filter-inline"
+					bind:value={metric}
+					on:change={() => loadLineData()}
+				>
+					<option value="messages">{$i18n.t('Messages')}</option>
+					<option value="tokens">{$i18n.t('Tokens')}</option>
+				</select>
+
+				<div class="relative" data-dropdown="calendar">
+					<select
+						class="analytics-select analytics-filter-inline"
+						bind:value={timePreset}
+						on:change={() => {
+							if (timePreset === 'custom') {
+								showCalendar = true;
+							} else {
+								showCalendar = false;
+								loadLineData();
+							}
+						}}
+					>
+						<option value="7">{$i18n.t('Last 7 Days')}</option>
+						<option value="20">{$i18n.t('Last 20 Days')}</option>
+						<option value="30">{$i18n.t('Last 30 Days')}</option>
+						<option value="all">{$i18n.t('All Time')}</option>
+						<option value="custom">{$i18n.t('Custom Range')} →</option>
+					</select>
+
+					{#if showCalendar && timePreset === 'custom'}
+						<div
+							class="absolute right-0 mt-2 z-50 bg-white dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 w-[260px] text-sm"
+						>
+							<div class="flex flex-col gap-2">
+								<label class="flex flex-col gap-1">
+									<span class="text-gray-500 text-xs">{$i18n.t('Start Date')}</span>
+									<input type="date" class="analytics-select py-1" bind:value={customStart} />
+								</label>
+								<label class="flex flex-col gap-1">
+									<span class="text-gray-500 text-xs">{$i18n.t('End Date')}</span>
+									<input type="date" class="analytics-select py-1" bind:value={customEnd} />
+								</label>
+								<div class="flex justify-end gap-2 mt-2">
+									<button
+										type="button"
+										class="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600"
+										on:click={() => {
+											showCalendar = false;
+										}}>{$i18n.t('Cancel')}</button
+									>
+									<button
+										type="button"
+										disabled={calendarApplyInvalid || !customStart || !customEnd}
+										class="px-3 py-1.5 rounded-lg bg-gray-900 text-white dark:bg-white dark:text-gray-900 disabled:opacity-40"
+										on:click={() => {
+											if (calendarApplyInvalid) return;
+											showCalendar = false;
+											loadLineData();
+										}}>{$i18n.t('Apply')}</button
+									>
+								</div>
+							</div>
+						</div>
+					{/if}
+				</div>
+
+				<div class="relative" data-dropdown="export">
+					<button
+						type="button"
+						class="analytics-select analytics-filter-inline inline-flex flex-shrink-0 items-center justify-between gap-1.5"
+						on:click|stopPropagation={() => (exportOpen = !exportOpen)}
+					>
+						<Download className="size-3.5 shrink-0" />
+						<span>{$i18n.t('Export')}</span>
+						<svg class="size-3.5 shrink-0 text-gray-400" fill="currentColor" viewBox="0 0 20 20"
+							><path
+								d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.24 4.5a.75.75 0 01-1.08 0l-4.24-4.5a.75.75 0 01.02-1.06z"
+							/></svg
+						>
+					</button>
+					{#if exportOpen}
+						<div
+							class="absolute right-0 mt-1 z-50 bg-white dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-lg shadow-md py-1 min-w-[160px]"
+						>
+							<button
+								type="button"
+								class="block w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm"
+								on:click|stopPropagation={() => exportLineCsv()}>{$i18n.t('Export as CSV')}</button
+							>
+							<button
+								type="button"
+								class="block w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm"
+								on:click|stopPropagation={() => exportLinePng()}>{$i18n.t('Export as PNG')}</button
+							>
+							<button
+								type="button"
+								class="block w-full text-left px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm"
+								on:click|stopPropagation={() => exportLineExcel()}>{$i18n.t('Export as Excel')}</button
+							>
+						</div>
+					{/if}
+				</div>
+			</div>
+		</div>
+
 		<div class="flex flex-col lg:flex-row min-h-[360px]">
 			<div class="lg:w-[30%] border-b lg:border-b-0 lg:border-r border-gray-100 dark:border-gray-800 p-6 flex flex-col">
 				<h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">
@@ -796,8 +909,8 @@
 						{$i18n.t('No data available')}
 					</div>
 				{:else}
-					<div class="relative flex-1 min-h-[260px]">
-						<canvas bind:this={pieCanvas} class="max-h-[280px] mx-auto" />
+					<div class="relative mx-auto h-[280px] w-full max-w-[280px] shrink-0">
+						<canvas bind:this={pieCanvas} class="block h-full w-full" />
 					</div>
 				{/if}
 			</div>
@@ -880,37 +993,48 @@
 				</button>
 			</div>
 			<div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
-				<table class="w-full text-sm analytics-table">
-					<thead class="bg-[#fafafa] dark:bg-gray-850">
-						<tr>
-							<th class="w-10 px-2 py-2 text-left font-semibold text-gray-700 dark:text-gray-200">#</th>
-							<th class="px-2 py-2 text-left font-semibold cursor-pointer" on:click={() => toggleSortModel('model')}
-								>{$i18n.t('Model')}</th
-							>
-							<th
-								class="px-2 py-2 text-right font-semibold cursor-pointer"
-								on:click={() => toggleSortModel('messages')}>{$i18n.t('Messages')}</th
-							>
-							<th class="px-2 py-2 text-right font-semibold cursor-pointer" on:click={() => toggleSortModel('tokens')}
-								>{$i18n.t('Tokens')}</th
-							>
-							<th
-								class="px-2 py-2 text-right font-semibold cursor-pointer"
-								on:click={() => toggleSortModel('share_percent')}>{$i18n.t('Usage Share')}</th
-							>
-						</tr>
-					</thead>
-				</table>
-				<div class="max-h-[280px] overflow-y-auto">
-					<table class="w-full text-sm analytics-table">
+				<div class="max-h-[280px] overflow-x-auto overflow-y-auto">
+					<table class="analytics-table w-full min-w-[520px] table-fixed border-collapse text-sm">
+						<colgroup>
+							<col style="width: 44px" />
+							<col />
+							<col style="width: 112px" />
+							<col style="width: 112px" />
+							<col style="width: 104px" />
+						</colgroup>
+						<thead
+							class="sticky top-0 z-10 border-b border-gray-200 bg-[#fafafa] dark:border-gray-700 dark:bg-gray-850"
+						>
+							<tr>
+								<th class="px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200">#</th>
+								<th
+									class="min-w-0 px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									on:click={() => toggleSortModel('model')}>{$i18n.t('Model')}</th
+								>
+								<th
+									class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									on:click={() => toggleSortModel('messages')}>{$i18n.t('Messages')}</th
+								>
+								<th
+									class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									on:click={() => toggleSortModel('tokens')}>{$i18n.t('Tokens')}</th
+								>
+								<th
+									class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									on:click={() => toggleSortModel('share_percent')}>{$i18n.t('Usage Share')}</th
+								>
+							</tr>
+						</thead>
 						<tbody>
 							{#each sortedModelTable as row, i}
-								<tr class="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-850/50">
-									<td class="w-10 px-2 py-2 text-gray-500">{i + 1}</td>
-									<td class="px-2 py-2">{row.model}</td>
-									<td class="px-2 py-2 text-right tabular-nums">{row.messages.toLocaleString()}</td>
-									<td class="px-2 py-2 text-right tabular-nums">{row.tokens.toLocaleString()}</td>
-									<td class="px-2 py-2 text-right tabular-nums">{row.share_percent}%</td>
+								<tr
+									class="border-t border-gray-100 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-850/50"
+								>
+									<td class="px-3 py-2.5 text-left text-gray-500 tabular-nums">{i + 1}</td>
+									<td class="min-w-0 truncate px-3 py-2.5 text-left" title={row.model}>{row.model}</td>
+									<td class="px-3 py-2.5 text-right tabular-nums">{row.messages.toLocaleString()}</td>
+									<td class="px-3 py-2.5 text-right tabular-nums">{row.tokens.toLocaleString()}</td>
+									<td class="px-3 py-2.5 text-right tabular-nums">{row.share_percent}%</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -936,44 +1060,58 @@
 				</button>
 			</div>
 			<div class="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
-				<table class="w-full text-sm analytics-table">
-					<thead class="bg-[#fafafa] dark:bg-gray-850">
-						<tr>
-							<th class="w-10 px-2 py-2 text-left font-semibold">#</th>
-							<th class="px-2 py-2 text-left font-semibold cursor-pointer" on:click={() => toggleSortUser('user')}
-								>{$i18n.t('User')}</th
-							>
-							<th class="px-2 py-2 text-left font-semibold cursor-pointer" on:click={() => toggleSortUser('role')}
-								>{$i18n.t('Role')}</th
-							>
-							<th
-								class="px-2 py-2 text-right font-semibold cursor-pointer"
-								on:click={() => toggleSortUser('messages')}>{$i18n.t('Messages')}</th
-							>
-							<th class="px-2 py-2 text-right font-semibold cursor-pointer" on:click={() => toggleSortUser('tokens')}
-								>{$i18n.t('Tokens')}</th
-							>
-						</tr>
-					</thead>
-				</table>
-				<div class="max-h-[280px] overflow-y-auto">
-					<table class="w-full text-sm analytics-table">
+				<div class="max-h-[280px] overflow-x-auto overflow-y-auto">
+					<table class="analytics-table w-full min-w-[480px] table-fixed border-collapse text-sm">
+						<colgroup>
+							<col style="width: 44px" />
+							<col />
+							<col style="width: 96px" />
+							<col style="width: 112px" />
+							<col style="width: 112px" />
+						</colgroup>
+						<thead
+							class="sticky top-0 z-10 border-b border-gray-200 bg-[#fafafa] dark:border-gray-700 dark:bg-gray-850"
+						>
+							<tr>
+								<th class="px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200">#</th>
+								<th
+									class="min-w-0 px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									on:click={() => toggleSortUser('user')}>{$i18n.t('User')}</th
+								>
+								<th
+									class="px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									on:click={() => toggleSortUser('role')}>{$i18n.t('Role')}</th
+								>
+								<th
+									class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									on:click={() => toggleSortUser('messages')}>{$i18n.t('Messages')}</th
+								>
+								<th
+									class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200 cursor-pointer"
+									on:click={() => toggleSortUser('tokens')}>{$i18n.t('Tokens')}</th
+								>
+							</tr>
+						</thead>
 						<tbody>
 							{#each sortedUserTable as row}
-								<tr class="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-850/50">
-									<td class="w-10 px-2 py-2 text-gray-500">{row.rank}</td>
-									<td class="px-2 py-2">{row.user}</td>
-									<td class="px-2 py-2">
+								<tr
+									class="border-t border-gray-100 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-850/50"
+								>
+									<td class="px-3 py-2.5 text-left text-gray-500 tabular-nums">{row.rank}</td>
+									<td class="min-w-0 truncate px-3 py-2.5 text-left" title={row.user}>{row.user}</td>
+									<td class="px-3 py-2.5 text-left">
 										<span
-											class="inline-block px-2 py-0.5 rounded text-xs font-medium {row.role === 'admin'
+											class="inline-block max-w-full truncate px-2 py-0.5 rounded text-xs font-medium {row.role ===
+											'admin'
 												? 'bg-gray-800 text-white'
 												: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'}"
+											title={row.role}
 										>
 											{row.role}
 										</span>
 									</td>
-									<td class="px-2 py-2 text-right tabular-nums">{row.messages.toLocaleString()}</td>
-									<td class="px-2 py-2 text-right tabular-nums">{row.tokens.toLocaleString()}</td>
+									<td class="px-3 py-2.5 text-right tabular-nums">{row.messages.toLocaleString()}</td>
+									<td class="px-3 py-2.5 text-right tabular-nums">{row.tokens.toLocaleString()}</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -1137,24 +1275,39 @@
 				>
 			</div>
 			<div class="overflow-auto flex-1 p-4">
-				<table class="w-full text-sm analytics-table">
-					<thead class="bg-[#fafafa] dark:bg-gray-850 sticky top-0">
+				<table class="analytics-table w-full table-fixed border-collapse text-sm">
+					<colgroup>
+						<col style="width: 44px" />
+						<col />
+						<col style="width: 112px" />
+						<col style="width: 112px" />
+						<col style="width: 104px" />
+					</colgroup>
+					<thead class="sticky top-0 z-10 border-b border-gray-200 bg-[#fafafa] dark:border-gray-700 dark:bg-gray-850">
 						<tr>
-							<th class="w-10 px-2 py-2 text-left font-semibold">#</th>
-							<th class="px-2 py-2 text-left font-semibold">{$i18n.t('Model')}</th>
-							<th class="px-2 py-2 text-right font-semibold">{$i18n.t('Messages')}</th>
-							<th class="px-2 py-2 text-right font-semibold">{$i18n.t('Tokens')}</th>
-							<th class="px-2 py-2 text-right font-semibold">{$i18n.t('Usage Share')}</th>
+							<th class="px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200">#</th>
+							<th class="min-w-0 px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200"
+								>{$i18n.t('Model')}</th
+							>
+							<th class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200"
+								>{$i18n.t('Messages')}</th
+							>
+							<th class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200"
+								>{$i18n.t('Tokens')}</th
+							>
+							<th class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200"
+								>{$i18n.t('Usage Share')}</th
+							>
 						</tr>
 					</thead>
 					<tbody>
 						{#each sortedModelTable as row, i}
 							<tr class="border-t border-gray-100 dark:border-gray-800">
-								<td class="w-10 px-2 py-2">{i + 1}</td>
-								<td class="px-2 py-2">{row.model}</td>
-								<td class="px-2 py-2 text-right">{row.messages.toLocaleString()}</td>
-								<td class="px-2 py-2 text-right">{row.tokens.toLocaleString()}</td>
-								<td class="px-2 py-2 text-right">{row.share_percent}%</td>
+								<td class="px-3 py-2.5 text-left text-gray-500 tabular-nums">{i + 1}</td>
+								<td class="min-w-0 truncate px-3 py-2.5 text-left" title={row.model}>{row.model}</td>
+								<td class="px-3 py-2.5 text-right tabular-nums">{row.messages.toLocaleString()}</td>
+								<td class="px-3 py-2.5 text-right tabular-nums">{row.tokens.toLocaleString()}</td>
+								<td class="px-3 py-2.5 text-right tabular-nums">{row.share_percent}%</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -1182,32 +1335,49 @@
 				>
 			</div>
 			<div class="overflow-auto flex-1 p-4">
-				<table class="w-full text-sm analytics-table">
-					<thead class="bg-[#fafafa] dark:bg-gray-850 sticky top-0">
+				<table class="analytics-table w-full table-fixed border-collapse text-sm">
+					<colgroup>
+						<col style="width: 44px" />
+						<col />
+						<col style="width: 96px" />
+						<col style="width: 112px" />
+						<col style="width: 112px" />
+					</colgroup>
+					<thead class="sticky top-0 z-10 border-b border-gray-200 bg-[#fafafa] dark:border-gray-700 dark:bg-gray-850">
 						<tr>
-							<th class="w-10 px-2 py-2 text-left font-semibold">#</th>
-							<th class="px-2 py-2 text-left font-semibold">{$i18n.t('User')}</th>
-							<th class="px-2 py-2 text-left font-semibold">{$i18n.t('Role')}</th>
-							<th class="px-2 py-2 text-right font-semibold">{$i18n.t('Messages')}</th>
-							<th class="px-2 py-2 text-right font-semibold">{$i18n.t('Tokens')}</th>
+							<th class="px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200">#</th>
+							<th class="min-w-0 px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200"
+								>{$i18n.t('User')}</th
+							>
+							<th class="px-3 py-2.5 text-left font-semibold text-gray-700 dark:text-gray-200"
+								>{$i18n.t('Role')}</th
+							>
+							<th class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200"
+								>{$i18n.t('Messages')}</th
+							>
+							<th class="px-3 py-2.5 text-right font-semibold text-gray-700 dark:text-gray-200"
+								>{$i18n.t('Tokens')}</th
+							>
 						</tr>
 					</thead>
 					<tbody>
 						{#each sortedUserTable as row}
 							<tr class="border-t border-gray-100 dark:border-gray-800">
-								<td class="w-10 px-2 py-2">{row.rank}</td>
-								<td class="px-2 py-2">{row.user}</td>
-								<td class="px-2 py-2">
+								<td class="px-3 py-2.5 text-left text-gray-500 tabular-nums">{row.rank}</td>
+								<td class="min-w-0 truncate px-3 py-2.5 text-left" title={row.user}>{row.user}</td>
+								<td class="px-3 py-2.5 text-left">
 									<span
-										class="inline-block px-2 py-0.5 rounded text-xs font-medium {row.role === 'admin'
+										class="inline-block max-w-full truncate px-2 py-0.5 rounded text-xs font-medium {row.role ===
+										'admin'
 											? 'bg-gray-800 text-white'
 											: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'}"
+										title={row.role}
 									>
 										{row.role}
 									</span>
 								</td>
-								<td class="px-2 py-2 text-right">{row.messages.toLocaleString()}</td>
-								<td class="px-2 py-2 text-right">{row.tokens.toLocaleString()}</td>
+								<td class="px-3 py-2.5 text-right tabular-nums">{row.messages.toLocaleString()}</td>
+								<td class="px-3 py-2.5 text-right tabular-nums">{row.tokens.toLocaleString()}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -1226,6 +1396,24 @@
 		background-size: 1rem;
 		padding-right: 2rem;
 		min-height: 38px;
+	}
+	/* Compact dropdowns in line-chart filter strip — stay within ~70% column */
+	.analytics-filter-inline {
+		flex: 1 1 auto;
+		min-width: 0;
+		max-width: 158px;
+		min-height: 32px;
+		padding-top: 0.375rem;
+		padding-bottom: 0.375rem;
+		padding-left: 0.5rem;
+		padding-right: 1.75rem;
+		font-size: 0.75rem;
+		line-height: 1.25rem;
+	}
+	@media (max-width: 1023px) {
+		.analytics-filter-inline {
+			max-width: min(158px, calc(50vw - 2rem));
+		}
 	}
 	.analytics-table tbody tr td {
 		@apply align-middle;

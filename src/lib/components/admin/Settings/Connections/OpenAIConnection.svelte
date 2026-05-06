@@ -1,12 +1,11 @@
 <script lang="ts">
-	import { getContext, tick } from 'svelte';
-	const i18n = getContext('i18n');
+	import { getContext } from 'svelte';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
-	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Cog6 from '$lib/components/icons/Cog6.svelte';
 	import AddConnectionModal from './AddConnectionModal.svelte';
-	import { connect } from 'socket.io-client';
+
+	const i18n = getContext('i18n');
 
 	export let onDelete = () => {};
 	export let onSubmit = () => {};
@@ -15,10 +14,55 @@
 
 	export let url = '';
 	export let key = '';
-	export let config = {};
+	export let config: Record<string, unknown> = {};
+
+	/** null = checking */
+	export let reachable: boolean | null = null;
 
 	let showConfigModal = false;
 </script>
+
+<tr class="border-b border-[#f0f0f0] bg-white last:border-b-0 dark:border-gray-800 dark:bg-gray-900">
+	<td class="min-w-0 px-4 py-3 align-middle">
+		{#if !(config?.enable ?? true)}
+			<div class="pointer-events-none opacity-50">{url}</div>
+		{:else}
+			<div class="truncate text-[14px] font-medium text-gray-900 dark:text-white" title={url}>
+				{url}
+			</div>
+		{/if}
+		{#if pipeline}
+			<div class="mt-0.5 text-[11px] text-gray-400">{$i18n.t('Pipeline')}</div>
+		{/if}
+	</td>
+	<td class="px-4 py-3 align-middle whitespace-nowrap">
+		{#if reachable === null}
+			<span class="text-[13px] text-gray-400">…</span>
+		{:else if reachable}
+			<span class="inline-flex items-center gap-2 text-[13px] font-medium text-green-600 dark:text-green-400">
+				<span class="h-2 w-2 shrink-0 rounded-full bg-green-500"></span>
+				{$i18n.t('Active')}
+			</span>
+		{:else}
+			<span class="inline-flex items-center gap-2 text-[13px] font-medium text-red-600 dark:text-red-400">
+				<span class="h-2 w-2 shrink-0 rounded-full bg-red-500"></span>
+				{$i18n.t('Inactive')}
+			</span>
+		{/if}
+	</td>
+	<td class="px-4 py-3 align-middle text-right">
+		<Tooltip content={$i18n.t('Configure')} className="inline-flex justify-end">
+			<button
+				type="button"
+				class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-850 dark:hover:text-white"
+				on:click={() => (showConfigModal = true)}
+				aria-label={$i18n.t('Configure')}
+			>
+				<Cog6 className="h-[18px] w-[18px]" strokeWidth="1.75" />
+			</button>
+		</Tooltip>
+	</td>
+</tr>
 
 <AddConnectionModal
 	edit
@@ -29,79 +73,10 @@
 		config
 	}}
 	{onDelete}
-	onSubmit={(connection) => {
-		url = connection.url;
-		key = connection.key;
-		config = connection.config;
-		onSubmit(connection);
+	onSubmit={(c) => {
+		url = c.url;
+		key = c.key;
+		config = { ...c.config };
+		onSubmit(c);
 	}}
 />
-
-<div class="flex w-full gap-2 items-center">
-	<Tooltip
-		className="w-full relative"
-		content={$i18n.t(`WebUI will make requests to "{{url}}/chat/completions"`, {
-			url
-		})}
-		placement="top-start"
-	>
-		{#if !(config?.enable ?? true)}
-			<div
-				class="absolute top-0 bottom-0 left-0 right-0 opacity-60 bg-white dark:bg-gray-900 z-10"
-			></div>
-		{/if}
-		<div class="flex w-full">
-			<div class="flex-1 relative">
-				<input
-					class=" outline-none w-full bg-transparent {pipeline ? 'pr-8' : ''}"
-					placeholder={$i18n.t('API Base URL')}
-					bind:value={url}
-					autocomplete="off"
-				/>
-
-				{#if pipeline}
-					<div class=" absolute top-0.5 right-2.5">
-						<Tooltip content="Pipelines">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 24 24"
-								fill="currentColor"
-								class="size-4"
-							>
-								<path
-									d="M11.644 1.59a.75.75 0 0 1 .712 0l9.75 5.25a.75.75 0 0 1 0 1.32l-9.75 5.25a.75.75 0 0 1-.712 0l-9.75-5.25a.75.75 0 0 1 0-1.32l9.75-5.25Z"
-								/>
-								<path
-									d="m3.265 10.602 7.668 4.129a2.25 2.25 0 0 0 2.134 0l7.668-4.13 1.37.739a.75.75 0 0 1 0 1.32l-9.75 5.25a.75.75 0 0 1-.71 0l-9.75-5.25a.75.75 0 0 1 0-1.32l1.37-.738Z"
-								/>
-								<path
-									d="m10.933 19.231-7.668-4.13-1.37.739a.75.75 0 0 0 0 1.32l9.75 5.25c.221.12.489.12.71 0l9.75-5.25a.75.75 0 0 0 0-1.32l-1.37-.738-7.668 4.13a2.25 2.25 0 0 1-2.134-.001Z"
-								/>
-							</svg>
-						</Tooltip>
-					</div>
-				{/if}
-			</div>
-
-			<SensitiveInput
-				inputClassName=" outline-none bg-transparent w-full"
-				placeholder={$i18n.t('API Key')}
-				bind:value={key}
-			/>
-		</div>
-	</Tooltip>
-
-	<div class="flex gap-1">
-		<Tooltip content={$i18n.t('Configure')} className="self-start">
-			<button
-				class="self-center p-1 bg-transparent hover:bg-gray-100 dark:bg-gray-900 dark:hover:bg-gray-850 rounded-lg transition"
-				on:click={() => {
-					showConfigModal = true;
-				}}
-				type="button"
-			>
-				<Cog6 />
-			</button>
-		</Tooltip>
-	</div>
-</div>

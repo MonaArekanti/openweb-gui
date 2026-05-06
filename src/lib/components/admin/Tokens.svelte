@@ -71,6 +71,10 @@
 		return '$' + n.toFixed(3);
 	}
 
+	function fmtUsd4(n: number) {
+		return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+	}
+
 	function fmtAxisVal(n: number, metric: 'tokens' | 'price') {
 		if (metric === 'tokens') {
 			if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
@@ -216,9 +220,19 @@
 		if (sortKey === 'model_name') {
 			return mul * a.model_name.localeCompare(b.model_name);
 		}
-		const va = Number(a[sortKey]);
-		const vb = Number(b[sortKey]);
-		return mul * (va - vb);
+		const va =
+			sortKey === 'total_tokens'
+				? a.total_tokens
+				: sortKey === 'price_per_1k_usd'
+					? (a.price_per_1k_usd ?? -1)
+					: (a.total_cost_usd ?? -1);
+		const vb =
+			sortKey === 'total_tokens'
+				? b.total_tokens
+				: sortKey === 'price_per_1k_usd'
+					? (b.price_per_1k_usd ?? -1)
+					: (b.total_cost_usd ?? -1);
+		return mul * (Number(va) - Number(vb));
 	}
 
 	$: sortedBreakdown = [...breakdownRows].sort(cmpRows);
@@ -242,11 +256,19 @@
 		loadBars();
 	}
 
+	function handleVisibilityChange() {
+		if (typeof document === 'undefined' || document.visibilityState !== 'visible') return;
+		loadSummaryBlock();
+		loadBars();
+		loadBreakdown();
+	}
+
 	$: maxBarVal = Math.max(1e-9, ...barRows.map((r) => r.value));
 	$: axisTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * maxBarVal);
 
 	onMount(async () => {
 		window.addEventListener('click', handleWindowClick);
+		document.addEventListener('visibilitychange', handleVisibilityChange);
 		try {
 			adminUsers = (await getUsers(localStorage.token)) ?? [];
 		} catch {
@@ -256,6 +278,7 @@
 		await Promise.all([loadBars(), loadBreakdown()]);
 		return () => {
 			window.removeEventListener('click', handleWindowClick);
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			cancelCountUp();
 		};
 	});
@@ -264,7 +287,7 @@
 <svelte:window on:click={handleWindowClick} on:keydown={handleExpandEscape} />
 
 <div class="tokens-admin pb-12 bg-[#f9f9f9] dark:bg-gray-900 min-h-full -mx-[16px] px-4 md:px-6 pt-2">
-	<h1 class="text-[28px] font-bold text-gray-900 dark:text-white mb-10">
+	<h1 class="text-[28px] font-bold text-gray-900 dark:text-white mb-8">
 		{$i18n.t('Token Usage')}
 	</h1>
 
@@ -281,106 +304,75 @@
 		</div>
 	{/if}
 
-	<!-- Top stats row: 3 bubbles + daily card -->
-	<div
-		class="flex flex-wrap justify-center items-center gap-x-[60px] gap-y-8 mb-12 px-1"
-		aria-live="polite"
-	>
-		<!-- Teal -->
-		<div class="flex flex-col items-center shrink-0">
-			<div
-				class="relative flex h-[180px] w-[180px] shrink-0 items-center justify-center rounded-full text-white shadow-[0_8px_32px_rgba(0,0,0,0.18)]"
-				style="background: radial-gradient(circle at 35% 35%, #5ee8dc, #2EC4B6 45%, #0e6e67);"
-			>
+	<!-- Ultra-compact stat row -->
+	<div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4" aria-live="polite">
+		<div class="h-[70px] flex items-stretch rounded-[8px] border border-[#e8e8e8] bg-white dark:border-gray-700 dark:bg-gray-850">
+			<div class="h-full w-[3px] shrink-0 bg-[#2EC4B6]"></div>
+			<div class="flex min-w-0 flex-1 flex-col justify-center px-4 py-[10px]">
+				<div class="text-[11px] font-medium uppercase tracking-[0.04em] text-[#999]">TOTAL TOKENS</div>
 				{#if summaryLoading}
-					<div class="h-12 w-28 animate-pulse rounded bg-white/25"></div>
+					<div class="mt-1 h-6 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
 				{:else}
-					<span class="text-[42px] font-bold leading-none tabular-nums">{fmtInt(displayTokens)}</span>
+					<div class="mt-1 truncate text-[20px] font-bold leading-none tabular-nums text-[#111] dark:text-white">
+						{fmtInt(displayTokens)}
+					</div>
 				{/if}
 			</div>
-			<p class="mt-3 text-[13px] text-gray-500 dark:text-gray-400 text-center max-w-[11rem]">
-				{$i18n.t('Total Tokens Used')}
-			</p>
 		</div>
 
-		<!-- Orange -->
-		<div class="flex flex-col items-center shrink-0">
-			<div
-				class="relative flex h-[180px] w-[180px] shrink-0 items-center justify-center rounded-full text-white shadow-[0_8px_32px_rgba(0,0,0,0.18)]"
-				style="background: radial-gradient(circle at 35% 35%, #f5b394, #E8845A 45%, #b5471e);"
-			>
+		<div class="h-[70px] flex items-stretch rounded-[8px] border border-[#e8e8e8] bg-white dark:border-gray-700 dark:bg-gray-850">
+			<div class="h-full w-[3px] shrink-0 bg-[#F4845F]"></div>
+			<div class="flex min-w-0 flex-1 flex-col justify-center px-4 py-[10px]">
+				<div class="text-[11px] font-medium uppercase tracking-[0.04em] text-[#999]">ESTIMATED COST</div>
 				{#if summaryLoading}
-					<div class="h-12 w-28 animate-pulse rounded bg-white/25"></div>
+					<div class="mt-1 h-6 w-20 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
 				{:else}
-					<span class="text-[42px] font-bold leading-none tabular-nums">{fmtUsdMoney(displayCost)}</span>
+					<div class="mt-1 truncate text-[20px] font-bold leading-none tabular-nums text-[#111] dark:text-white">
+						{fmtUsdMoney(displayCost)}
+					</div>
 				{/if}
 			</div>
-			<p class="mt-3 text-[13px] text-gray-500 dark:text-gray-400 text-center max-w-[11rem]">
-				{$i18n.t('Total Estimated Cost')}
-			</p>
 		</div>
 
-		<!-- Purple -->
-		<div class="flex flex-col items-center shrink-0">
-			<div
-				class="relative flex h-[180px] w-[180px] shrink-0 items-center justify-center rounded-full text-white shadow-[0_8px_32px_rgba(0,0,0,0.18)]"
-				style="background: radial-gradient(circle at 35% 35%, #c9a6f5, #9B59B6 45%, #6a1f9a);"
-			>
+		<div class="h-[70px] flex items-stretch rounded-[8px] border border-[#e8e8e8] bg-white dark:border-gray-700 dark:bg-gray-850">
+			<div class="h-full w-[3px] shrink-0 bg-[#9B59B6]"></div>
+			<div class="flex min-w-0 flex-1 flex-col justify-center px-4 py-[10px]">
+				<div class="text-[11px] font-medium uppercase tracking-[0.04em] text-[#999]">AVG TOKENS / MSG</div>
 				{#if summaryLoading}
-					<div class="h-12 w-24 animate-pulse rounded bg-white/25"></div>
+					<div class="mt-1 h-6 w-14 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
 				{:else}
-					<span class="text-[42px] font-bold leading-none tabular-nums">{displayAvg.toFixed(1)}</span>
+					<div class="mt-1 truncate text-[20px] font-bold leading-none tabular-nums text-[#111] dark:text-white">
+						{displayAvg.toFixed(1)}
+					</div>
 				{/if}
 			</div>
-			<p class="mt-3 text-[13px] text-gray-500 dark:text-gray-400 text-center max-w-[13rem]">
-				{$i18n.t('Average Tokens per Message')}
-			</p>
 		</div>
 
-		<!-- Daily card -->
-		<div
-			class="w-full max-w-[280px] lg:w-[220px] lg:max-w-none min-h-[180px] flex flex-col justify-center rounded-2xl border border-[#e8e8e8] bg-white px-6 py-5 shadow-[0_4px_16px_rgba(0,0,0,0.08)] dark:border-gray-700 dark:bg-gray-850"
-		>
-			<p class="text-[13px] font-bold uppercase tracking-wide text-[#888] dark:text-gray-400 mb-4">
-				{$i18n.t('Daily Tokens')}
-			</p>
-			{#if dailyLoading}
-				<div class="space-y-3 animate-pulse">
-					<div class="h-4 w-24 rounded bg-gray-200 dark:bg-gray-700"></div>
-					<div class="h-8 w-32 rounded bg-gray-200 dark:bg-gray-700"></div>
-					<div class="h-4 w-24 rounded bg-gray-200 dark:bg-gray-700"></div>
-					<div class="h-8 w-28 rounded bg-gray-200 dark:bg-gray-700"></div>
-				</div>
-			{:else if daily}
-				<div class="space-y-1">
-					<p class="text-[12px] text-gray-500 dark:text-gray-400">{$i18n.t('Total Tokens')}</p>
-					<p class="text-[22px] font-bold text-[#111] dark:text-white tabular-nums">
-						{fmtInt(daily.today_tokens)}
-					</p>
-				</div>
-				<div class="mt-4 space-y-1">
-					<p class="text-[12px] text-gray-500 dark:text-gray-400">{$i18n.t('Total Cost')}</p>
-					<p class="text-[22px] font-bold text-[#111] dark:text-white tabular-nums">
-						{fmtUsd3(daily.today_cost_usd)}
-					</p>
-				</div>
-				<div class="my-4 border-t border-[#f0f0f0] dark:border-gray-700"></div>
-				<div class="text-[12px]">
-					{#if daily.yesterday_tokens === 0}
-						<span class="text-[#888]">{$i18n.t('No data yesterday')}</span>
-					{:else if daily.change_percent === null}
-						<span class="text-[#888]">—</span>
-					{:else if daily.change_percent > 0}
-						<span class="text-[#16a34a]">▲ +{daily.change_percent}% {$i18n.t('from yesterday')}</span>
-					{:else if daily.change_percent < 0}
-						<span class="text-[#dc2626]"
-							>▼ {Math.abs(daily.change_percent)}% {$i18n.t('from yesterday')}</span
-						>
+		<div class="h-[70px] flex items-stretch rounded-[8px] border border-[#e8e8e8] bg-white dark:border-gray-700 dark:bg-gray-850">
+			<div class="h-full w-[3px] shrink-0 bg-[#3B82F6]"></div>
+			<div class="flex min-w-0 flex-1 flex-col justify-center px-4 py-[10px]">
+				<div class="text-[11px] font-medium uppercase tracking-[0.04em] text-[#999]">TODAY'S TOKENS</div>
+				<div class="mt-1 flex min-w-0 items-center gap-2">
+					{#if dailyLoading}
+						<div class="h-6 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
 					{:else}
-						<span class="text-[#888]">→ 0% {$i18n.t('from yesterday')}</span>
+						<div class="truncate text-[20px] font-bold leading-none tabular-nums text-[#111] dark:text-white">
+							{daily ? fmtInt(daily.today_tokens) : '—'}
+						</div>
+					{/if}
+					{#if !dailyLoading && daily && daily.yesterday_tokens !== 0 && daily.change_percent !== null}
+						{#if daily.change_percent > 0}
+							<span class="inline-flex shrink-0 rounded-full bg-[#dcfce7] px-[6px] py-[1px] text-[10px] font-bold text-[#16a34a]">
+								▲ +{daily.change_percent}%
+							</span>
+						{:else if daily.change_percent < 0}
+							<span class="inline-flex shrink-0 rounded-full bg-[#fee2e2] px-[6px] py-[1px] text-[10px] font-bold text-[#dc2626]">
+								▼ {Math.abs(daily.change_percent)}%
+							</span>
+						{/if}
 					{/if}
 				</div>
-			{/if}
+			</div>
 		</div>
 	</div>
 
@@ -520,102 +512,131 @@
 		</div>
 	</div>
 
-	<!-- Token breakdown -->
-	<div class="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-		<h2 class="text-[18px] font-bold text-gray-900 dark:text-white">{$i18n.t('Token Breakdown')}</h2>
-		<div class="flex flex-wrap items-center gap-3">
-			<select
-				class="filter-dd min-w-[160px]"
-				bind:value={tableUserId}
-				on:change={loadBreakdown}
-			>
-				<option value="">{$i18n.t('All Users')}</option>
-				{#each adminUsers as u}
-					<option value={u.id}>{u.name || u.email || u.id}</option>
-				{/each}
-			</select>
-			<button
-				type="button"
-				class="filter-dd bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800"
-				on:click={() => (expandOpen = true)}
-			>
-				{$i18n.t('Expand')}
-			</button>
+	<!-- Token breakdown: 70% width on md+, filters aligned to top-right of this block -->
+	<div class="mb-6 w-full max-w-full min-w-0 md:max-w-[70%]">
+		<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+			<h2 class="text-[18px] font-bold text-gray-900 dark:text-white shrink-0">
+				{$i18n.t('Token Breakdown')}
+			</h2>
+			<div class="flex flex-wrap items-center justify-end gap-3 sm:ml-auto sm:flex-nowrap">
+				<select
+					class="filter-dd min-w-[160px]"
+					bind:value={tableUserId}
+					on:change={loadBreakdown}
+				>
+					<option value="">{$i18n.t('All Users')}</option>
+					{#each adminUsers as u}
+						<option value={u.id}>{u.name || u.email || u.id}</option>
+					{/each}
+				</select>
+				<button
+					type="button"
+					class="filter-dd bg-white dark:bg-gray-850 hover:bg-gray-50 dark:hover:bg-gray-800"
+					on:click={() => (expandOpen = true)}
+				>
+					{$i18n.t('Expand')}
+				</button>
+			</div>
 		</div>
-	</div>
 
-	{#if tableError && breakdownRows.length === 0}
-		<div class="mb-4 text-red-600 dark:text-red-400 flex items-center gap-3">
-			<span>{tableError}</span>
-			<button type="button" class="underline text-sm" on:click={loadBreakdown}>{$i18n.t('Retry')}</button>
-		</div>
-	{/if}
+		{#if tableError && breakdownRows.length === 0}
+			<div class="mb-4 text-red-600 dark:text-red-400 flex items-center gap-3">
+				<span>{tableError}</span>
+				<button type="button" class="underline text-sm" on:click={loadBreakdown}>{$i18n.t('Retry')}</button>
+			</div>
+		{/if}
 
-	<div
-		class="rounded-xl border border-[#e8e8e8] dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-850 shadow-[0_1px_4px_rgba(0,0,0,0.06)]"
-	>
-		<div class="overflow-x-auto">
-			<div class="max-h-[280px] overflow-y-auto">
-				<table class="w-full min-w-[720px] border-collapse text-sm">
-					<thead class="sticky top-0 z-[1] border-b border-[#e8e8e8] bg-[#fafafa] dark:bg-gray-800 dark:border-gray-700">
-						<tr>
-							<th class="px-4 py-3 text-left font-bold text-gray-700 dark:text-gray-200 w-10">#</th>
-							<th class="px-4 py-3 text-left">
-								<button type="button" class="font-bold text-gray-700 dark:text-gray-200 hover:underline" on:click={() => toggleSort('model_name')}>
-									{$i18n.t('Model')}
-									{sortKey === 'model_name' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-								</button>
-							</th>
-							<th class="px-4 py-3 text-right">
-								<button type="button" class="font-bold text-gray-700 dark:text-gray-200 hover:underline" on:click={() => toggleSort('total_tokens')}>
-									{$i18n.t('Total Tokens')}
-									{sortKey === 'total_tokens' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-								</button>
-							</th>
-							<th class="px-4 py-3 text-right">
-								<button type="button" class="font-bold text-gray-700 dark:text-gray-200 hover:underline" on:click={() => toggleSort('price_per_1k_usd')}>
-									{$i18n.t('Price per 1K tokens')}
-									{sortKey === 'price_per_1k_usd' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-								</button>
-							</th>
-							<th class="px-4 py-3 text-right">
-								<button type="button" class="font-bold text-gray-700 dark:text-gray-200 hover:underline" on:click={() => toggleSort('total_cost_usd')}>
-									{$i18n.t('Total Cost')}
-									{sortKey === 'total_cost_usd' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-								</button>
-							</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#if tableLoading}
-							{#each [1, 2, 3, 4, 5] as _}
-								<tr class="border-b border-[#e8e8e8] dark:border-gray-700">
-									<td colspan="5" class="px-4 py-3">
-										<div class="h-5 animate-pulse rounded bg-gray-100 dark:bg-gray-800"></div>
+		<div
+			class="rounded-xl border border-[#e8e8e8] dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-850 shadow-[0_1px_4px_rgba(0,0,0,0.06)]"
+		>
+			<div class="overflow-x-auto">
+				<div class="max-h-[280px] overflow-y-auto">
+					<table class="w-full min-w-[640px] table-fixed border-collapse text-sm">
+						<colgroup>
+							<col style="width: 44px" />
+							<col />
+							<col style="width: 130px" />
+							<col style="width: 150px" />
+							<col style="width: 130px" />
+						</colgroup>
+						<thead class="sticky top-0 z-[1] border-b border-[#e8e8e8] bg-[#fafafa] dark:bg-gray-800 dark:border-gray-700">
+							<tr>
+								<th class="px-4 py-3 text-left font-bold text-gray-700 dark:text-gray-200">#</th>
+								<th class="px-4 py-3 text-left">
+									<button type="button" class="font-bold text-gray-700 dark:text-gray-200 hover:underline" on:click={() => toggleSort('model_name')}>
+										{$i18n.t('Model')}
+										{sortKey === 'model_name' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+									</button>
+								</th>
+								<th class="px-4 py-3 text-right">
+									<button type="button" class="font-bold text-gray-700 dark:text-gray-200 hover:underline" on:click={() => toggleSort('total_tokens')}>
+										{$i18n.t('Total Tokens')}
+										{sortKey === 'total_tokens' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+									</button>
+								</th>
+								<th class="px-4 py-3 text-right">
+									<button type="button" class="font-bold text-gray-700 dark:text-gray-200 hover:underline" on:click={() => toggleSort('price_per_1k_usd')}>
+										{$i18n.t('Price per 1K tokens')}
+										{sortKey === 'price_per_1k_usd' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+									</button>
+								</th>
+								<th class="px-4 py-3 text-right">
+									<button type="button" class="font-bold text-gray-700 dark:text-gray-200 hover:underline" on:click={() => toggleSort('total_cost_usd')}>
+										{$i18n.t('Total Cost')}
+										{sortKey === 'total_cost_usd' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+									</button>
+								</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#if tableLoading}
+								{#each [1, 2, 3, 4, 5] as _}
+									<tr class="border-b border-[#e8e8e8] dark:border-gray-700">
+										<td colspan="5" class="px-4 py-3">
+											<div class="h-5 animate-pulse rounded bg-gray-100 dark:bg-gray-800"></div>
+										</td>
+									</tr>
+								{/each}
+							{:else if sortedBreakdown.length === 0}
+								<tr>
+									<td colspan="5" class="px-4 py-10 text-center text-gray-500">
+										{$i18n.t('No token data available')}
 									</td>
 								</tr>
-							{/each}
-						{:else if sortedBreakdown.length === 0}
-							<tr>
-								<td colspan="5" class="px-4 py-10 text-center text-gray-500">
-									{$i18n.t('No token data available')}
-								</td>
-							</tr>
-						{:else}
-							{#each sortedBreakdown as row, i}
-								<tr
-									class="border-b border-[#e8e8e8] hover:bg-[#f5f5f5] dark:border-gray-700 dark:hover:bg-gray-800/80"
-								>
-									<td class="px-4 py-3 text-gray-600 dark:text-gray-300">{i + 1}</td>
-									<td class="px-4 py-3 text-gray-900 dark:text-white">{row.model_name}</td>
-									<td class="px-4 py-3 text-right tabular-nums">{fmtInt(row.total_tokens)}</td>
-									<td class="px-4 py-3 text-right tabular-nums">{fmtUsd3(row.price_per_1k_usd)}</td>
-									<td class="px-4 py-3 text-right tabular-nums">{fmtUsd3(row.total_cost_usd)}</td>
-								</tr>
-							{/each}
-						{/if}
+							{:else}
+								{#each sortedBreakdown as row, i}
+									<tr
+										class="border-b border-[#e8e8e8] hover:bg-[#f5f5f5] dark:border-gray-700 dark:hover:bg-gray-800/80"
+									>
+										<td class="px-4 py-3 text-left text-gray-600 dark:text-gray-300 tabular-nums">{i + 1}</td>
+										<td class="min-w-0 truncate px-4 py-3 text-left text-gray-900 dark:text-white" title={row.model_name}>{row.model_name}</td>
+										<td class="px-4 py-3 text-right tabular-nums">{fmtInt(row.total_tokens)}</td>
+										<td class="px-4 py-3 text-right tabular-nums">
+											{#if row.price_per_1k_usd != null}
+												{fmtUsd4(row.price_per_1k_usd)}
+											{:else}
+												<span
+													class="text-gray-400"
+													title={$i18n.t('Set price in Settings → Connections')}>—</span
+												>
+											{/if}
+										</td>
+										<td class="px-4 py-3 text-right tabular-nums">
+											{#if row.total_cost_usd != null}
+												{fmtUsd3(row.total_cost_usd)}
+											{:else}
+												<span
+													class="text-gray-400"
+													title={$i18n.t('Set price in Settings → Connections')}>—</span
+												>
+											{/if}
+										</td>
+									</tr>
+								{/each}
+							{/if}
 					</tbody>
 				</table>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -643,9 +664,16 @@
 				</button>
 			</div>
 			<div class="overflow-auto flex-1 p-6">
-				<table class="w-full min-w-[720px] border-collapse text-sm">
-					<thead class="sticky top-0 bg-[#fafafa] dark:bg-gray-800">
-						<tr class="border-b border-[#e8e8e8] dark:border-gray-700">
+				<table class="w-full min-w-[640px] table-fixed border-collapse text-sm">
+					<colgroup>
+						<col style="width: 44px" />
+						<col />
+						<col style="width: 130px" />
+						<col style="width: 150px" />
+						<col style="width: 130px" />
+					</colgroup>
+					<thead class="sticky top-0 z-[1] border-b border-[#e8e8e8] bg-[#fafafa] dark:border-gray-700 dark:bg-gray-800">
+						<tr>
 							<th class="px-4 py-3 text-left font-bold">#</th>
 							<th class="px-4 py-3 text-left font-bold">{$i18n.t('Model')}</th>
 							<th class="px-4 py-3 text-right font-bold">{$i18n.t('Total Tokens')}</th>
@@ -656,11 +684,15 @@
 					<tbody>
 						{#each sortedBreakdown as row, i}
 							<tr class="border-b border-[#e8e8e8] dark:border-gray-700 hover:bg-[#f5f5f5] dark:hover:bg-gray-800/80">
-								<td class="px-4 py-3">{i + 1}</td>
-								<td class="px-4 py-3">{row.model_name}</td>
+								<td class="px-4 py-3 text-left tabular-nums text-gray-600 dark:text-gray-300">{i + 1}</td>
+								<td class="min-w-0 truncate px-4 py-3 text-left" title={row.model_name}>{row.model_name}</td>
 								<td class="px-4 py-3 text-right tabular-nums">{fmtInt(row.total_tokens)}</td>
-								<td class="px-4 py-3 text-right tabular-nums">{fmtUsd3(row.price_per_1k_usd)}</td>
-								<td class="px-4 py-3 text-right tabular-nums">{fmtUsd3(row.total_cost_usd)}</td>
+								<td class="px-4 py-3 text-right tabular-nums">
+									{#if row.price_per_1k_usd != null}{fmtUsd4(row.price_per_1k_usd)}{:else}<span class="text-gray-400">—</span>{/if}
+								</td>
+								<td class="px-4 py-3 text-right tabular-nums">
+									{#if row.total_cost_usd != null}{fmtUsd3(row.total_cost_usd)}{:else}<span class="text-gray-400">—</span>{/if}
+								</td>
 							</tr>
 						{/each}
 					</tbody>

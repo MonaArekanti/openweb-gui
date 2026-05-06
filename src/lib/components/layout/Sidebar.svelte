@@ -267,11 +267,13 @@
 		chatListLoading = false;
 	};
 
-	/** Title-only client filter (instant); list still loads via pagination */
+	/** Title-only client filter (instant); flat list newest-first */
 	$: normalizedSearch = search.trim().toLowerCase();
-	$: chatsForDisplay = ($chats ?? []).filter(
-		(c) => !normalizedSearch || (c.title ?? '').toLowerCase().includes(normalizedSearch)
-	);
+	$: chatsForDisplay = [...($chats ?? [])]
+		.filter(
+			(c) => !normalizedSearch || (c.title ?? '').toLowerCase().includes(normalizedSearch)
+		)
+		.sort((a, b) => (b.updated_at ?? 0) - (a.updated_at ?? 0));
 
 	$: if (typeof window !== 'undefined') {
 		localStorage.sidebarFoldersOpen = String(foldersSectionOpen);
@@ -772,13 +774,12 @@
 							<div
 								class="ml-3 pl-1 mt-[1px] flex flex-col overflow-y-auto scrollbar-hidden border-s border-gray-100 dark:border-gray-900"
 							>
-								{#each $pinnedChats as chat, idx}
+								{#each $pinnedChats as chat}
 									<ChatItem
 										className=""
 										id={chat.id}
 										title={chat.title}
 										folderOptions={folderPickList}
-										titleEmoji={chat.meta?.emoji ?? ''}
 										{shiftKey}
 										selected={selectedChatId === chat.id}
 										on:select={() => {
@@ -819,42 +820,12 @@
 									{$i18n.t('No results found')}
 								</div>
 							{/if}
-							{#each chatsForDisplay as chat, idx}
-								{#if idx === 0 || (idx > 0 && chat.time_range !== chatsForDisplay[idx - 1].time_range)}
-									<div
-										class="w-full pl-2 text-[12px] text-[#999] dark:text-gray-500 font-medium {idx ===
-										0
-											? ''
-											: 'pt-5'} pb-1.5 tracking-wide"
-									>
-										{$i18n.t(chat.time_range)}
-										<!-- localisation keys for time_range to be recognized from the i18next parser (so they don't get automatically removed):
-							{$i18n.t('Today')}
-							{$i18n.t('Yesterday')}
-							{$i18n.t('Previous 7 days')}
-							{$i18n.t('Previous 30 days')}
-							{$i18n.t('January')}
-							{$i18n.t('February')}
-							{$i18n.t('March')}
-							{$i18n.t('April')}
-							{$i18n.t('May')}
-							{$i18n.t('June')}
-							{$i18n.t('July')}
-							{$i18n.t('August')}
-							{$i18n.t('September')}
-							{$i18n.t('October')}
-							{$i18n.t('November')}
-							{$i18n.t('December')}
-							-->
-									</div>
-								{/if}
-
+							{#each chatsForDisplay as chat}
 								<ChatItem
 									className=""
 									id={chat.id}
 									title={chat.title}
 									folderOptions={folderPickList}
-									titleEmoji={chat.meta?.emoji ?? ''}
 									{shiftKey}
 									selected={selectedChatId === chat.id}
 									on:select={() => {

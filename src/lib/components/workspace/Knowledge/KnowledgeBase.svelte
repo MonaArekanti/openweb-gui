@@ -11,7 +11,13 @@
 	import { page } from '$app/stores';
 	import { mobile, showSidebar, knowledge as _knowledge } from '$lib/stores';
 
-	import { updateFileDataContentById, uploadFile, getUploadErrorMessage } from '$lib/apis/files';
+	import {
+		updateFileDataContentById,
+		uploadFile,
+		getUploadErrorMessage,
+		isUploadSensitiveBlockedError
+	} from '$lib/apis/files';
+	import { sensitiveUploadBlockedModalOpen } from '$lib/stores';
 	import {
 		addFileToKnowledgeById,
 		getKnowledgeById,
@@ -167,8 +173,12 @@
 			});
 			await addFileHandler(uploadedFile.id);
 		} catch (e) {
-			toast.error(getUploadErrorMessage(e, $i18n.t));
 			knowledge.files = (knowledge.files ?? []).filter((item) => item.itemId !== tempItemId);
+			if (isUploadSensitiveBlockedError(e)) {
+				sensitiveUploadBlockedModalOpen.set(true);
+			} else {
+				toast.error(getUploadErrorMessage(e, $i18n.t));
+			}
 		}
 	};
 

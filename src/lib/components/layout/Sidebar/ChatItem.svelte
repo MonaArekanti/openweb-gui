@@ -37,8 +37,6 @@
 	import DragGhost from '$lib/components/common/DragGhost.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
-	import Document from '$lib/components/icons/Document.svelte';
-
 	export let className = '';
 
 	export let id;
@@ -49,8 +47,6 @@
 
 	/** Move-to-folder submenu */
 	export let folderOptions: { id: string; name: string }[] = [];
-	/** Optional emoji/icon from chat metadata when API provides it */
-	export let titleEmoji = '';
 
 	let chat = null;
 	let chatMenuShow = false;
@@ -217,11 +213,8 @@
 {#if dragged && x && y}
 	<DragGhost {x} {y}>
 		<div class=" bg-black/80 backdrop-blur-2xl px-2 py-1 rounded-lg w-fit max-w-40">
-			<div class="flex items-center gap-1">
-				<Document className=" size-[18px]" strokeWidth="2" />
-				<div class=" text-xs text-white line-clamp-1">
-					{title}
-				</div>
+			<div class=" text-xs text-white line-clamp-1">
+				{title}
 			</div>
 		</div>
 	</DragGhost>
@@ -282,26 +275,10 @@
 			on:focus={(e) => {}}
 			draggable="false"
 		>
-			<div class=" flex self-center flex-1 w-full min-w-0 gap-2.5 items-center">
-				{#if titleEmoji}
-					<span
-						class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200/90 dark:bg-gray-700 text-[15px] leading-none"
-						aria-hidden="true"
-						>{titleEmoji}</span
-					>
-				{:else}
-					<span
-						class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-600 dark:to-gray-700 text-[10px] font-semibold text-gray-600 dark:text-gray-300"
-						aria-hidden="true"
-					>
-						{(title || '?').slice(0, 1).toUpperCase()}
-					</span>
-				{/if}
-				<div
-					class=" text-left self-center overflow-hidden w-full min-w-0 text-[14px] leading-snug line-clamp-1 text-gray-900 dark:text-gray-100"
-				>
-					{title}
-				</div>
+			<div
+				class="flex flex-1 min-w-0 self-center text-left text-[14px] leading-snug line-clamp-1 text-gray-900 dark:text-gray-100"
+			>
+				{title}
 			</div>
 		</a>
 	{/if}

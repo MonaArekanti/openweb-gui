@@ -69,6 +69,9 @@ export const temporaryChatEnabled = writable(false);
 export const scrollPaginationEnabled = writable(false);
 export const currentChatPage = writable(1);
 
+/** Global modal: sensitive document upload blocked by server validation */
+export const sensitiveUploadBlockedModalOpen = writable(false);
+
 export const isLastActiveTab = writable(true);
 export const playingNotificationSound = writable(false);
 

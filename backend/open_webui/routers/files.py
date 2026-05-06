@@ -29,6 +29,20 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.upload_validation import validate_upload_buffer
+from open_webui.models.sensitive_upload_event import record_sensitive_upload_rejection
+
+
+def _client_session_id(request: Request) -> Optional[str]:
+    sid = request.headers.get("x-webui-client-session")
+    if sid and str(sid).strip():
+        return str(sid).strip()[:128]
+    return None
+
+
+def _detection_type_for_stage(stage: str | None) -> str:
+    if stage in ("filename", "metadata"):
+        return "metadata-sensitive"
+    return "content-sensitive"
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -64,19 +78,21 @@ def upload_file(
                 vr.stage,
                 vr.detail,
             )
-            if vr.stage in ("metadata", "filename"):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "code": "upload_metadata_sensitive",
-                        "message": "Sensitive file detected. Upload blocked.",
-                    },
-                )
+            det_type = _detection_type_for_stage(vr.stage)
+            record_sensitive_upload_rejection(
+                user.id,
+                filename,
+                det_type,
+                session_id=_client_session_id(request),
+                category=vr.detail,
+                internal_stage=vr.stage,
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
-                    "code": "upload_content_sensitive",
-                    "message": "Sensitive content detected inside the document.",
+                    "code": "upload_sensitive_blocked",
+                    "message": "Sensitive content detected. This document cannot be uploaded.",
+                    "detection_type": det_type,
                 },
             )
 
@@ -127,6 +143,8 @@ def upload_file(
                 detail=ERROR_MESSAGES.DEFAULT("Error uploading file"),
             )
 
+    except HTTPException:
+        raise
     except Exception as e:
         log.exception(e)
         raise HTTPException(

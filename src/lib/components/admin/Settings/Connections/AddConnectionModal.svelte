@@ -33,6 +33,9 @@
 	let modelId = '';
 	let modelIds = [];
 
+	/** USD per 1K tokens for this connection (saved under config.price_per_1k) */
+	let pricePer1k = '';
+
 	let loading = false;
 
 	const verifyOllamaHandler = async () => {
@@ -79,17 +82,28 @@
 			return;
 		}
 
-		const connection = {
+		const prevCfg =
+			edit && connection && typeof connection === 'object' && connection.config
+				? { ...connection.config }
+				: {};
+		const cfg = {
+			...prevCfg,
+			enable: enable,
+			prefix_id: prefixId,
+			model_ids: modelIds
+		};
+		const pv = String(pricePer1k ?? '').trim();
+		if (pv !== '' && !Number.isNaN(Number(pv))) {
+			cfg.price_per_1k = Number(pv);
+		} else {
+			delete cfg.price_per_1k;
+		}
+
+		await onSubmit({
 			url,
 			key,
-			config: {
-				enable: enable,
-				prefix_id: prefixId,
-				model_ids: modelIds
-			}
-		};
-
-		await onSubmit(connection);
+			config: cfg
+		});
 
 		loading = false;
 		show = false;
@@ -98,6 +112,7 @@
 		key = '';
 		prefixId = '';
 		modelIds = [];
+		pricePer1k = '';
 	};
 
 	const init = () => {
@@ -108,6 +123,12 @@
 			enable = connection.config?.enable ?? true;
 			prefixId = connection.config?.prefix_id ?? '';
 			modelIds = connection.config?.model_ids ?? [];
+			pricePer1k =
+				connection.config?.price_per_1k != null && connection.config?.price_per_1k !== ''
+					? String(connection.config.price_per_1k)
+					: '';
+		} else {
+			pricePer1k = '';
 		}
 	};
 
@@ -240,6 +261,35 @@
 							</div>
 						</div>
 
+						<div
+							class="relative flex gap-3 rounded-[10px] border-[1.5px] border-[#2EC4B6] bg-[#f7ffff] dark:border-teal-600 dark:bg-gray-900/50 p-4 my-3"
+						>
+							<div class="w-1 shrink-0 rounded bg-[#2EC4B6]" aria-hidden="true"></div>
+							<div class="flex-1 min-w-0">
+								<h3 class="text-sm font-bold text-[#111] dark:text-white">
+									{$i18n.t('Pricing Configuration')}
+								</h3>
+								<p class="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-3 leading-relaxed">
+									{$i18n.t(
+										'Set the cost per 1,000 tokens for this connection. Used to calculate estimated costs across the platform.'
+									)}
+								</p>
+								<label
+									class="block text-[13px] font-bold text-[#111] dark:text-white mb-1.5"
+									for="conn-price-per-1k">{$i18n.t('Price per 1K Tokens (USD)')}</label
+								>
+								<input
+									id="conn-price-per-1k"
+									class="w-full rounded-lg border-2 border-[#2EC4B6] bg-[#f0fffe] dark:bg-gray-850 dark:border-teal-500 px-[14px] py-2.5 text-sm text-gray-900 dark:text-white outline-none"
+									type="number"
+									step="0.0001"
+									min="0"
+									bind:value={pricePer1k}
+									placeholder={$i18n.t('e.g. 0.002')}
+								/>
+							</div>
+						</div>
+
 						<hr class=" border-gray-100 dark:border-gray-700/10 my-2.5 w-full" />
 
 						<div class="flex flex-col w-full">
@@ -321,8 +371,8 @@
 						{/if}
 
 						<button
-							class="px-3.5 py-1.5 text-sm font-medium bg-black hover:bg-gray-900 text-white dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full flex flex-row space-x-1 items-center {loading
-								? ' cursor-not-allowed'
+							class="px-3.5 py-1.5 text-sm font-medium bg-[#2EC4B6] hover:bg-[#26b0a5] text-white transition rounded-lg flex flex-row space-x-1 items-center {loading
+								? ' cursor-not-allowed opacity-70'
 								: ''}"
 							type="submit"
 							disabled={loading}

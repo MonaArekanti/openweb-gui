@@ -13,7 +13,8 @@
 	import { get, type Unsubscriber, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL } from '$lib/constants';
-	import { uploadFile, getUploadErrorMessage } from '$lib/apis/files';
+	import { uploadFile, getUploadErrorMessage, isUploadSensitiveBlockedError } from '$lib/apis/files';
+	import { sensitiveUploadBlockedModalOpen } from '$lib/stores';
 
 	import {
 		chatId,
@@ -542,13 +543,17 @@
 		} catch (e) {
 			console.error('Error uploading file:', e);
 			files = files.filter((f) => f.itemId !== tempItemId);
-			const message =
-				e && typeof e === 'object' && 'detail' in e
-					? getUploadErrorMessage(e, $i18n.t)
-					: $i18n.t('Error uploading file: {{error}}', {
-							error: e instanceof Error ? e.message : String(e ?? 'Unknown error')
-						});
-			toast.error(message);
+			if (isUploadSensitiveBlockedError(e)) {
+				sensitiveUploadBlockedModalOpen.set(true);
+			} else {
+				const message =
+					e && typeof e === 'object' && 'detail' in e
+						? getUploadErrorMessage(e, $i18n.t)
+						: $i18n.t('Error uploading file: {{error}}', {
+								error: e instanceof Error ? e.message : String(e ?? 'Unknown error')
+							});
+				toast.error(message);
+			}
 		}
 	};
 

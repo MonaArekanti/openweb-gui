@@ -1,8 +1,34 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
+import { getWebUIClientSessionId } from '$lib/utils/clientSession';
 
 export type UploadApiErrorBody = {
-	detail?: string | { code?: string; message?: string };
+	detail?:
+		| string
+		| {
+				code?: string;
+				message?: string;
+				detection_type?: string;
+		  };
 };
+
+/** Backend blocked upload due to sensitivity validation (no file stored). */
+export function isUploadSensitiveBlockedError(err: unknown): boolean {
+	const code = parseUploadErrorCode(err);
+	return (
+		code === 'upload_sensitive_blocked' ||
+		code === 'upload_metadata_sensitive' ||
+		code === 'upload_content_sensitive'
+	);
+}
+
+export function parseUploadErrorCode(err: unknown): string | null {
+	if (!err || typeof err !== 'object' || !('detail' in err)) return null;
+	const d = (err as UploadApiErrorBody).detail;
+	if (d && typeof d === 'object' && d !== null && 'code' in d && typeof (d as { code?: string }).code === 'string') {
+		return (d as { code: string }).code;
+	}
+	return null;
+}
 
 /** Maps backend upload validation errors to user-facing strings. */
 export function getUploadErrorMessage(
@@ -13,6 +39,9 @@ export function getUploadErrorMessage(
 		const d = (err as UploadApiErrorBody).detail;
 		if (d && typeof d === 'object' && d !== null && 'code' in d) {
 			const code = (d as { code?: string }).code;
+			if (code === 'upload_sensitive_blocked') {
+				return t('Sensitive content detected. This document cannot be uploaded.');
+			}
 			if (code === 'upload_metadata_sensitive') {
 				return t('Sensitive file detected. Upload blocked.');
 			}
@@ -38,11 +67,13 @@ export const uploadFile = async (token: string, file: File) => {
 	const data = new FormData();
 	data.append('file', file);
 
+	const sid = getWebUIClientSessionId();
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',
-			authorization: `Bearer ${token}`
+			authorization: `Bearer ${token}`,
+			...(sid ? { 'X-WebUI-Client-Session': sid } : {})
 		},
 		body: data
 	});

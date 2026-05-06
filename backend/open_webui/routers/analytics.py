@@ -16,6 +16,7 @@ from open_webui.utils.analytics import (
     total_assistant_tokens,
     usage_over_time_points,
 )
+from open_webui.models.sensitive_upload_event import get_sensitive_upload_block_counts
 from open_webui.utils.auth import get_admin_user
 
 
@@ -45,6 +46,9 @@ class AnalyticsSummaryResponse(BaseModel):
     chats: int
     users: int
     estimated_cost: float
+    sensitive_upload_blocks_total: int = 0
+    sensitive_upload_blocks_metadata: int = 0
+    sensitive_upload_blocks_content: int = 0
 
 
 @router.get("/summary", response_model=AnalyticsSummaryResponse)
@@ -59,6 +63,7 @@ async def get_analytics_summary(
     users_n = Users.get_num_users() or 0
     rate = float(request.app.state.config.ANALYTICS_ESTIMATED_COST_PER_TOKEN_USD or 0)
     cost = round(tokens_n * rate, 6)
+    su = get_sensitive_upload_block_counts()
 
     return AnalyticsSummaryResponse(
         messages=messages_n,
@@ -66,6 +71,9 @@ async def get_analytics_summary(
         chats=chats_n,
         users=users_n,
         estimated_cost=cost,
+        sensitive_upload_blocks_total=su["total"],
+        sensitive_upload_blocks_metadata=su["metadata_sensitive"],
+        sensitive_upload_blocks_content=su["content_sensitive"],
     )
 
 

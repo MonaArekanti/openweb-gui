@@ -10,17 +10,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from open_webui.models.chats import Chats
 from open_webui.models.models import Models as ModelsStore
-from open_webui.models.models import ModelModel
 from open_webui.utils.analytics import (
     aggregate_model_tokens_in_window,
     count_ui_messages,
     filter_non_shared_chats,
+    iter_assistant_events_filtered,
     sum_tokens_in_window,
     total_assistant_tokens,
 )
 from open_webui.utils.auth import get_admin_user
+from open_webui.utils.connection_pricing import resolve_model_connection
 
 router = APIRouter()
+DEFAULT_PRICE_PER_1K_USD = 1.0
 
 
 def _parse_day(value: str) -> date:
@@ -42,28 +44,14 @@ def _utc_day_end_exclusive(d: date) -> int:
     return _utc_day_start_timestamp(d + timedelta(days=1))
 
 
-def _params_as_dict(params) -> dict:
-    if isinstance(params, dict):
-        return params
-    if hasattr(params, "model_dump"):
-        try:
-            return params.model_dump()
-        except Exception:
-            pass
-    return {}
-
-
-def model_price_per_1k_usd(m: ModelModel, rate_per_token_usd: float) -> float:
-    """Prefer explicit per-model USD per 1K tokens in params; else global estimate × 1000."""
-    d = _params_as_dict(m.params)
-    for key in ("price_per_1k_tokens_usd", "price_per_1k", "per_1k_token_price_usd"):
-        v = d.get(key)
-        if v is not None:
-            try:
-                return max(0.0, float(v))
-            except (TypeError, ValueError):
-                continue
-    return max(0.0, float(rate_per_token_usd or 0.0)) * 1000.0
+def _effective_price_per_1k(p1k: Optional[float]) -> float:
+    """Use configured price when present, otherwise fallback to a safe default."""
+    try:
+        if p1k is None:
+            return DEFAULT_PRICE_PER_1K_USD
+        return max(0.0, float(p1k))
+    except (TypeError, ValueError):
+        return DEFAULT_PRICE_PER_1K_USD
 
 
 class TokensSummaryResponse(BaseModel):
@@ -71,6 +59,7 @@ class TokensSummaryResponse(BaseModel):
 
     total_tokens: int
     total_estimated_cost_usd: float
+    has_missing_connection_prices: bool
     avg_tokens_per_message: float
     rate_per_token_usd: float
 
@@ -101,13 +90,49 @@ class BreakdownRow(BaseModel):
 
     model_id: str
     model_name: str
+    connection_url: Optional[str] = None
     total_tokens: int
-    price_per_1k_usd: float
-    total_cost_usd: float
+    price_per_1k_usd: Optional[float] = None
+    total_cost_usd: Optional[float] = None
 
 
 class TokenBreakdownResponse(BaseModel):
     rows: list[BreakdownRow]
+
+
+def _estimated_cost_from_connections(chats: list, request: Request) -> tuple[float, bool]:
+    acc = aggregate_model_tokens_in_window(
+        chats,
+        user_id=None,
+        start_ts=None,
+        end_ts_exclusive=None,
+    )
+    total = 0.0
+    for mid, data in acc.items():
+        tok = int(data["tokens"])
+        _, price, _ = resolve_model_connection(mid, request)
+        total += (tok / 1000.0) * _effective_price_per_1k(price)
+    # We now fallback to DEFAULT_PRICE_PER_1K_USD whenever a model has no explicit price.
+    return round(total, 6), False
+
+
+def _estimated_cost_in_window(
+    chats: list, request: Request, start_ts: int, end_exc: int
+) -> float:
+    from collections import defaultdict
+
+    by_model: dict[str, int] = defaultdict(int)
+    for ev in iter_assistant_events_filtered(
+        chats,
+        start_ts=start_ts,
+        end_ts_exclusive=end_exc,
+    ):
+        by_model[ev["model_id"]] += ev["tokens"]
+    total = 0.0
+    for mid, tok in by_model.items():
+        _, price, _ = resolve_model_connection(mid, request)
+        total += (tok / 1000.0) * _effective_price_per_1k(price)
+    return round(total, 6)
 
 
 @router.get("/summary", response_model=TokensSummaryResponse)
@@ -117,12 +142,13 @@ async def get_tokens_summary(request: Request, user=Depends(get_admin_user)):
     tokens_n = total_assistant_tokens(chats_all)
     messages_n = count_ui_messages(chats_all)
     rate = float(request.app.state.config.ANALYTICS_ESTIMATED_COST_PER_TOKEN_USD or 0)
-    cost = round(tokens_n * rate, 6)
+    cost, missing = _estimated_cost_from_connections(chats_all, request)
     avg = round(tokens_n / messages_n, 1) if messages_n else 0.0
 
     return TokensSummaryResponse(
         total_tokens=tokens_n,
         total_estimated_cost_usd=cost,
+        has_missing_connection_prices=missing,
         avg_tokens_per_message=avg,
         rate_per_token_usd=rate,
     )
@@ -132,7 +158,6 @@ async def get_tokens_summary(request: Request, user=Depends(get_admin_user)):
 async def get_tokens_daily(request: Request, user=Depends(get_admin_user)):
     del user
     chats_all = filter_non_shared_chats(Chats.get_chats())
-    rate = float(request.app.state.config.ANALYTICS_ESTIMATED_COST_PER_TOKEN_USD or 0)
 
     today_d = datetime.now(timezone.utc).date()
     yesterday_d = today_d - timedelta(days=1)
@@ -154,8 +179,12 @@ async def get_tokens_daily(request: Request, user=Depends(get_admin_user)):
         end_ts_exclusive=y_end_exc,
     )
 
-    today_cost = round(today_tokens * rate, 6)
-    yesterday_cost = round(yesterday_tokens * rate, 6)
+    today_cost = _estimated_cost_in_window(
+        chats_all, request, today_start, now_ts + 1
+    )
+    yesterday_cost = _estimated_cost_in_window(
+        chats_all, request, y_start, y_end_exc
+    )
 
     change_pct: Optional[float]
     if yesterday_tokens == 0:
@@ -220,7 +249,12 @@ async def get_model_token_bars(
     for mid, data in acc.items():
         tok = int(data["tokens"])
         disp = _model_display_name(mid, data["display"])
-        val = float(tok) if metric == "tokens" else round(tok * rate, 6)
+        _, p1k, _ = resolve_model_connection(mid, request)
+        effective_price = _effective_price_per_1k(p1k)
+        if metric == "tokens":
+            val = float(tok)
+        else:
+            val = round((tok / 1000.0) * effective_price, 6)
         if mid in by_id:
             by_id[mid] = ModelBarRow(model_id=mid, model_name=disp, value=val)
         else:
@@ -239,7 +273,6 @@ async def get_token_breakdown(
 ):
     del user
     chats_all = filter_non_shared_chats(Chats.get_chats())
-    rate = float(request.app.state.config.ANALYTICS_ESTIMATED_COST_PER_TOKEN_USD or 0)
 
     acc = aggregate_model_tokens_in_window(
         chats_all,
@@ -260,18 +293,17 @@ async def get_token_breakdown(
             if mm and mm.name
             else _model_display_name(mid, acc[mid]["display"] if mid in acc else mid)
         )
-        if mm:
-            p1k = model_price_per_1k_usd(mm, rate)
-        else:
-            p1k = rate * 1000.0
-        cost = round((tok / 1000.0) * p1k, 6)
+        conn_url, p1k, _ = resolve_model_connection(mid, request)
+        effective_price = _effective_price_per_1k(p1k)
+        cost_val: Optional[float] = round((tok / 1000.0) * effective_price, 6)
         rows.append(
             BreakdownRow(
                 model_id=mid,
                 model_name=disp,
+                connection_url=conn_url,
                 total_tokens=tok,
-                price_per_1k_usd=round(p1k, 6),
-                total_cost_usd=cost,
+                price_per_1k_usd=round(effective_price, 6),
+                total_cost_usd=cost_val,
             )
         )
 
