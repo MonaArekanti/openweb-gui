@@ -11,7 +11,7 @@
 	import { page } from '$app/stores';
 	import { mobile, showSidebar, knowledge as _knowledge } from '$lib/stores';
 
-	import { updateFileDataContentById, uploadFile } from '$lib/apis/files';
+	import { updateFileDataContentById, uploadFile, getUploadErrorMessage } from '$lib/apis/files';
 	import {
 		addFileToKnowledgeById,
 		getKnowledgeById,
@@ -148,28 +148,27 @@
 		}
 
 		try {
-			const uploadedFile = await uploadFile(localStorage.token, file).catch((e) => {
-				toast.error(e);
-				return null;
-			});
+			const uploadedFile = await uploadFile(localStorage.token, file);
 
-			if (uploadedFile) {
-				console.log(uploadedFile);
-				knowledge.files = knowledge.files.map((item) => {
-					if (item.itemId === tempItemId) {
-						item.id = uploadedFile.id;
-					}
+			console.log(uploadedFile);
 
-					// Remove temporary item id
-					delete item.itemId;
-					return item;
-				});
-				await addFileHandler(uploadedFile.id);
-			} else {
-				toast.error($i18n.t('Failed to upload file.'));
+			if (uploadedFile.meta?.sensitivity_content_warning) {
+				toast.warning($i18n.t('Sensitive content detected inside the document.'));
 			}
+
+			knowledge.files = knowledge.files.map((item) => {
+				if (item.itemId === tempItemId) {
+					item.id = uploadedFile.id;
+				}
+
+				// Remove temporary item id
+				delete item.itemId;
+				return item;
+			});
+			await addFileHandler(uploadedFile.id);
 		} catch (e) {
-			toast.error(e);
+			toast.error(getUploadErrorMessage(e, $i18n.t));
+			knowledge.files = (knowledge.files ?? []).filter((item) => item.itemId !== tempItemId);
 		}
 	};
 

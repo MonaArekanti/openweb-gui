@@ -10,6 +10,19 @@
 
 	let loaded = false;
 
+	function tabClass(href: string): string {
+		const p = $page.url.pathname;
+		let active = false;
+		if (href === '/admin/users') {
+			active = p === '/admin' || p === '/admin/users';
+		} else {
+			active = p === href || p.startsWith(href + '/');
+		}
+		return active
+			? 'font-semibold text-gray-900 dark:text-white'
+			: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white';
+	}
+
 	onMount(async () => {
 		if ($user?.role !== 'admin') {
 			await goto('/');
@@ -52,30 +65,37 @@
 						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent pt-1"
 					>
 						<a
-							class="min-w-fit rounded-full p-1.5 {['/admin/users'].includes($page.url.pathname)
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							href="/admin">{$i18n.t('Users')}</a
+							class="min-w-fit rounded-full p-1.5 transition {tabClass('/admin/users')}"
+							href="/admin/users">{$i18n.t('Users')}</a
 						>
 
 						<a
-							class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/admin/evaluations')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+							class="min-w-fit rounded-full p-1.5 transition {tabClass('/admin/analytics')}"
+							href="/admin/analytics">{$i18n.t('Analytics')}</a
+						>
+
+						<a
+							class="min-w-fit rounded-full p-1.5 transition {tabClass('/admin/tokens')}"
+							href="/admin/tokens">{$i18n.t('Tokens')}</a
+						>
+
+						<a
+							class="min-w-fit rounded-full p-1.5 transition {tabClass('/admin/chats')}"
+							href="/admin/chats">{$i18n.t('Chats')}</a
+						>
+
+						<a
+							class="min-w-fit rounded-full p-1.5 transition {tabClass('/admin/evaluations')}"
 							href="/admin/evaluations">{$i18n.t('Evaluations')}</a
 						>
 
 						<a
-							class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/admin/functions')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+							class="min-w-fit rounded-full p-1.5 transition {tabClass('/admin/functions')}"
 							href="/admin/functions">{$i18n.t('Functions')}</a
 						>
 
 						<a
-							class="min-w-fit rounded-full p-1.5 {$page.url.pathname.includes('/admin/settings')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
+							class="min-w-fit rounded-full p-1.5 transition {tabClass('/admin/settings')}"
 							href="/admin/settings">{$i18n.t('Settings')}</a
 						>
 					</div>

@@ -886,6 +886,37 @@ WEBHOOK_URL = PersistentConfig(
     "WEBHOOK_URL", "webhook_url", os.environ.get("WEBHOOK_URL", "")
 )
 
+try:
+    _analytics_token_price = float(
+        os.environ.get("ANALYTICS_ESTIMATED_COST_PER_TOKEN_USD", "0") or 0
+    )
+except ValueError:
+    _analytics_token_price = 0.0
+
+ANALYTICS_ESTIMATED_COST_PER_TOKEN_USD = PersistentConfig(
+    "ANALYTICS_ESTIMATED_COST_PER_TOKEN_USD",
+    "analytics.estimated_cost_per_token_usd",
+    _analytics_token_price,
+)
+
+UPLOAD_SENSITIVITY_VALIDATION_ENABLED = PersistentConfig(
+    "UPLOAD_SENSITIVITY_VALIDATION_ENABLED",
+    "upload.sensitivity_validation.enabled",
+    os.environ.get("UPLOAD_SENSITIVITY_VALIDATION_ENABLED", "False").lower() == "true",
+)
+
+UPLOAD_SENSITIVITY_RULES_PATH = PersistentConfig(
+    "UPLOAD_SENSITIVITY_RULES_PATH",
+    "upload.sensitivity_validation.rules_path",
+    os.environ.get("UPLOAD_SENSITIVITY_RULES_PATH", "") or "",
+)
+
+UPLOAD_SENSITIVE_CONTENT_ACTION = PersistentConfig(
+    "UPLOAD_SENSITIVE_CONTENT_ACTION",
+    "upload.sensitivity_validation.content_action",
+    (os.environ.get("UPLOAD_SENSITIVE_CONTENT_ACTION", "block") or "block").lower(),
+)
+
 ENABLE_ADMIN_EXPORT = os.environ.get("ENABLE_ADMIN_EXPORT", "True").lower() == "true"
 
 ENABLE_ADMIN_CHAT_ACCESS = (

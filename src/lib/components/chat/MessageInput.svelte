@@ -21,7 +21,7 @@
 
 	import { blobToFile, compressImage, createMessagesList, findWordIndices } from '$lib/utils';
 	import { transcribeAudio } from '$lib/apis/audio';
-	import { uploadFile } from '$lib/apis/files';
+	import { uploadFile, getUploadErrorMessage } from '$lib/apis/files';
 	import { getTools } from '$lib/apis/tools';
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
@@ -195,6 +195,10 @@
 					toast.warning(uploadedFile.error);
 				}
 
+				if (uploadedFile.meta?.sensitivity_content_warning) {
+					toast.warning($i18n.t('Sensitive content detected inside the document.'));
+				}
+
 				fileItem.status = 'uploaded';
 				fileItem.file = uploadedFile;
 				fileItem.id = uploadedFile.id;
@@ -207,7 +211,7 @@
 				files = files.filter((item) => item?.itemId !== tempItemId);
 			}
 		} catch (e) {
-			toast.error(e);
+			toast.error(getUploadErrorMessage(e, $i18n.t));
 			files = files.filter((item) => item?.itemId !== tempItemId);
 		}
 	};

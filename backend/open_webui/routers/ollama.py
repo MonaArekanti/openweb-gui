@@ -384,6 +384,21 @@ async def get_ollama_tags(
     return models
 
 
+def _ollama_version_sort_key(obj: dict) -> tuple:
+    """Parse Ollama /api/version JSON for ordering; invalid entries sort as (0,0,0)."""
+    try:
+        ver = obj.get("version")
+        if ver is None or ver is False:
+            return (0, 0, 0)
+        v = re.sub(r"^v|-.*", "", str(ver))
+        parts = [int(p) for p in v.split(".")[:3]]
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts[:3])
+    except (TypeError, ValueError):
+        return (0, 0, 0)
+
+
 @router.get("/api/version")
 @router.get("/api/version/{url_idx}")
 async def get_ollama_versions(request: Request, url_idx: Optional[int] = None):
@@ -400,22 +415,22 @@ async def get_ollama_versions(request: Request, url_idx: Optional[int] = None):
                 for url in request.app.state.config.OLLAMA_BASE_URLS
             ]
             responses = await asyncio.gather(*request_tasks)
-            responses = list(filter(lambda x: x is not None, responses))
+            responses = [
+                x
+                for x in responses
+                if isinstance(x, dict) and x.get("version") not in (None, False, "")
+            ]
 
             if len(responses) > 0:
-                lowest_version = min(
-                    responses,
-                    key=lambda x: tuple(
-                        map(int, re.sub(r"^v|-.*", "", x["version"]).split("."))
-                    ),
-                )
-
-                return {"version": lowest_version["version"]}
+                try:
+                    lowest_version = min(responses, key=_ollama_version_sort_key)
+                    return {"version": lowest_version["version"]}
+                except Exception as e:
+                    log.warning("Could not aggregate Ollama versions: %s", e)
+                    return {"version": False}
             else:
-                raise HTTPException(
-                    status_code=500,
-                    detail=ERROR_MESSAGES.OLLAMA_NOT_FOUND,
-                )
+                # Avoid 500 spam in the UI when Ollama is not running; clients treat False as disconnected.
+                return {"version": False}
         else:
             url = request.app.state.config.OLLAMA_BASE_URLS[url_idx]
 
@@ -428,19 +443,8 @@ async def get_ollama_versions(request: Request, url_idx: Optional[int] = None):
             except Exception as e:
                 log.exception(e)
 
-                detail = None
-                if r is not None:
-                    try:
-                        res = r.json()
-                        if "error" in res:
-                            detail = f"Ollama: {res['error']}"
-                    except Exception:
-                        detail = f"Ollama: {e}"
-
-                raise HTTPException(
-                    status_code=r.status_code if r else 500,
-                    detail=detail if detail else "Open WebUI: Server Connection Error",
-                )
+                # Same as aggregate path: disconnected Ollama must not surface as HTTP 500 to the SPA.
+                return {"version": False}
     else:
         return {"version": False}
 

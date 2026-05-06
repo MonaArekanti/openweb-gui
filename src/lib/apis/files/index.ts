@@ -1,9 +1,42 @@
 import { WEBUI_API_BASE_URL } from '$lib/constants';
 
+export type UploadApiErrorBody = {
+	detail?: string | { code?: string; message?: string };
+};
+
+/** Maps backend upload validation errors to user-facing strings. */
+export function getUploadErrorMessage(
+	err: unknown,
+	t: (key: string, opts?: Record<string, unknown>) => string
+): string {
+	if (err && typeof err === 'object' && 'detail' in err) {
+		const d = (err as UploadApiErrorBody).detail;
+		if (d && typeof d === 'object' && d !== null && 'code' in d) {
+			const code = (d as { code?: string }).code;
+			if (code === 'upload_metadata_sensitive') {
+				return t('Sensitive file detected. Upload blocked.');
+			}
+			if (code === 'upload_content_sensitive') {
+				return t('Sensitive content detected inside the document.');
+			}
+			const message = (d as { message?: string }).message;
+			if (typeof message === 'string' && message.length > 0) {
+				return message;
+			}
+		}
+		if (typeof d === 'string') {
+			return d;
+		}
+	}
+	if (err instanceof Error && err.message) {
+		return err.message;
+	}
+	return t('Failed to upload file.');
+}
+
 export const uploadFile = async (token: string, file: File) => {
 	const data = new FormData();
 	data.append('file', file);
-	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/files/`, {
 		method: 'POST',
@@ -12,22 +45,20 @@ export const uploadFile = async (token: string, file: File) => {
 			authorization: `Bearer ${token}`
 		},
 		body: data
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			error = err.detail;
-			console.log(err);
-			return null;
-		});
+	});
 
-	if (error) {
-		throw error;
+	let body: unknown = {};
+	try {
+		body = await res.json();
+	} catch {
+		body = {};
 	}
 
-	return res;
+	if (!res.ok) {
+		throw body;
+	}
+
+	return body;
 };
 
 export const uploadDir = async (token: string) => {

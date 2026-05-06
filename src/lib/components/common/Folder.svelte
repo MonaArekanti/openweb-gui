@@ -22,6 +22,9 @@
 	export let dragAndDrop = true;
 
 	export let className = '';
+	/** Section header style (sidebar labels) */
+	export let headerClassName =
+		'group rounded-md relative flex items-center justify-between hover:bg-[#efefef] dark:hover:bg-gray-900 text-[#999] dark:text-gray-500 transition';
 
 	let folderElement;
 
@@ -103,7 +106,7 @@
 		if (!dragAndDrop) {
 			return;
 		}
-		folderElement.addEventListener('dragover', onDragOver);
+		folderElement.removeEventListener('dragover', onDragOver);
 		folderElement.removeEventListener('drop', onDrop);
 		folderElement.removeEventListener('dragleave', onDragLeave);
 	});
@@ -126,19 +129,20 @@
 			}}
 		>
 			<!-- svelte-ignore a11y-no-static-element-interactions -->
-			<div
-				class="w-full group rounded-md relative flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-900 text-gray-500 dark:text-gray-500 transition"
-			>
-				<button class="w-full py-1.5 pl-2 flex items-center gap-1.5 text-xs font-medium">
-					<div class="text-gray-300 dark:text-gray-600">
+			<div class="w-full {headerClassName}">
+				<button
+					type="button"
+					class="w-full py-2 pl-2 pr-2 flex items-center gap-1.5 text-[12px] font-medium text-[#999] dark:text-gray-500"
+				>
+					<div class="shrink-0 opacity-80">
 						{#if open}
-							<ChevronDown className=" size-3" strokeWidth="2.5" />
+							<ChevronDown className=" size-3.5" strokeWidth="2.5" />
 						{:else}
-							<ChevronRight className=" size-3" strokeWidth="2.5" />
+							<ChevronRight className=" size-3.5" strokeWidth="2.5" />
 						{/if}
 					</div>
 
-					<div class="translate-y-[0.5px]">
+					<div class="translate-y-[0.5px] flex-1 text-left font-medium">
 						{name}
 					</div>
 				</button>

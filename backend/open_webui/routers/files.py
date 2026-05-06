@@ -1,6 +1,7 @@
 import logging
 import os
 import uuid
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel
@@ -27,6 +28,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.upload_validation import validate_upload_buffer
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
@@ -48,11 +50,49 @@ def upload_file(
         unsanitized_filename = file.filename
         filename = os.path.basename(unsanitized_filename)
 
+        contents = file.file.read()
+        if not contents:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=ERROR_MESSAGES.EMPTY_CONTENT,
+            )
+
+        vr = validate_upload_buffer(request, contents, filename, file.content_type)
+        if not vr.allowed:
+            log.warning(
+                "Upload rejected by sensitivity validation (stage=%s detail=%s)",
+                vr.stage,
+                vr.detail,
+            )
+            if vr.stage in ("metadata", "filename"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "upload_metadata_sensitive",
+                        "message": "Sensitive file detected. Upload blocked.",
+                    },
+                )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "upload_content_sensitive",
+                    "message": "Sensitive content detected inside the document.",
+                },
+            )
+
         # replace filename with uuid
         id = str(uuid.uuid4())
         name = filename
         filename = f"{id}_{filename}"
-        contents, file_path = Storage.upload_file(file.file, filename)
+        contents, file_path = Storage.upload_file(BytesIO(contents), filename)
+
+        file_meta = {
+            "name": name,
+            "content_type": file.content_type,
+            "size": len(contents),
+        }
+        if vr.content_sensitivity_warning:
+            file_meta["sensitivity_content_warning"] = True
 
         file_item = Files.insert_new_file(
             user.id,
@@ -61,11 +101,7 @@ def upload_file(
                     "id": id,
                     "filename": name,
                     "path": file_path,
-                    "meta": {
-                        "name": name,
-                        "content_type": file.content_type,
-                        "size": len(contents),
-                    },
+                    "meta": file_meta,
                 }
             ),
         )

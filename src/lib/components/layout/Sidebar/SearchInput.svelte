@@ -10,6 +10,11 @@
 	export let placeholder = '';
 	export let value = '';
 
+	/** Sidebar: muted styling + optional stroke icon */
+	export let variant: 'default' | 'sidebar' = 'default';
+	/** When false, hide tag / search-option autocomplete dropdown */
+	export let showTagSuggestions = true;
+
 	let selectedIdx = 0;
 
 	let lastWord = '';
@@ -25,33 +30,36 @@
 	let loading = false;
 
 	let filteredOptions = options;
-	$: filteredOptions = options.filter((option) => {
-		return option.name.startsWith(lastWord);
-	});
-
-	let filteredTags = [];
-	$: filteredTags = lastWord.startsWith('tag:')
-		? [
-				...$tags,
-				{
-					id: 'none',
-					name: $i18n.t('Untagged')
-				}
-			].filter((tag) => {
-				const tagName = lastWord.slice(4);
-				if (tagName) {
-					const tagId = tagName.replace(' ', '_').toLowerCase();
-
-					if (tag.id !== tagId) {
-						return tag.id.startsWith(tagId);
-					} else {
-						return false;
-					}
-				} else {
-					return true;
-				}
+	$: filteredOptions = showTagSuggestions
+		? options.filter((option) => {
+				return option.name.startsWith(lastWord);
 			})
 		: [];
+
+	let filteredTags = [];
+	$: filteredTags =
+		!showTagSuggestions || !lastWord.startsWith('tag:')
+			? []
+			: [
+					...$tags,
+					{
+						id: 'none',
+						name: $i18n.t('Untagged')
+					}
+				].filter((tag) => {
+					const tagName = lastWord.slice(4);
+					if (tagName) {
+						const tagId = tagName.replace(' ', '_').toLowerCase();
+
+						if (tag.id !== tagId) {
+							return tag.id.startsWith(tagId);
+						} else {
+							return false;
+						}
+					} else {
+						return true;
+					}
+				});
 
 	const initTags = async () => {
 		loading = true;
@@ -80,25 +88,54 @@
 	});
 </script>
 
-<div class="px-1 mb-1 flex justify-center space-x-2 relative z-10" id="search-container">
-	<div class="flex w-full rounded-xl" id="chat-search">
-		<div class="self-center pl-3 py-2 rounded-l-xl bg-transparent">
-			<svg
-				xmlns="http://www.w3.org/2000/svg"
-				viewBox="0 0 20 20"
-				fill="currentColor"
-				class="w-4 h-4"
-			>
-				<path
-					fill-rule="evenodd"
-					d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
-					clip-rule="evenodd"
-				/>
-			</svg>
+<div
+	class="px-1 mb-1 flex justify-center space-x-2 relative z-10 {variant === 'sidebar'
+		? 'mb-2'
+		: ''}"
+	id="search-container"
+>
+	<div
+		class="flex w-full rounded-xl border border-transparent {variant === 'sidebar'
+			? 'rounded-lg bg-white/80 dark:bg-gray-900/50 px-3 py-2 items-center gap-2 shadow-none'
+			: ''}"
+		id="chat-search"
+	>
+		<div class="self-center shrink-0 {variant === 'sidebar' ? 'py-0 pl-0' : 'pl-3 py-2 rounded-l-xl'} bg-transparent">
+			{#if variant === 'sidebar'}
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke-width="1.5"
+					stroke="currentColor"
+					class="w-[18px] h-[18px] text-gray-400 dark:text-gray-500"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+					/>
+				</svg>
+			{:else}
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					viewBox="0 0 20 20"
+					fill="currentColor"
+					class="w-4 h-4"
+				>
+					<path
+						fill-rule="evenodd"
+						d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
+						clip-rule="evenodd"
+					/>
+				</svg>
+			{/if}
 		</div>
 
 		<input
-			class="w-full rounded-r-xl py-1.5 pl-2.5 pr-4 text-sm bg-transparent dark:text-gray-300 outline-none"
+			class="w-full min-w-0 bg-transparent outline-none text-sm leading-snug {variant === 'sidebar'
+				? 'rounded-none py-0 pl-0 pr-2 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-gray-900 dark:text-gray-200'
+				: 'rounded-r-xl py-1.5 pl-2.5 pr-4 dark:text-gray-300'}"
 			placeholder={placeholder ? placeholder : $i18n.t('Search')}
 			bind:value
 			on:input={() => {
@@ -109,6 +146,14 @@
 				initTags();
 			}}
 			on:keydown={(e) => {
+				if (e.key === 'Escape') {
+					value = '';
+					dispatch('clear');
+					dispatch('input');
+					e.currentTarget.blur();
+					focused = false;
+					return;
+				}
 				if (e.key === 'Enter') {
 					if (filteredTags.length > 0) {
 						const tagElement = document.getElementById(`search-tag-${selectedIdx}`);

@@ -12,7 +12,8 @@
 
 	import { get, type Unsubscriber, type Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
-	import { WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL } from '$lib/constants';
+	import { uploadFile, getUploadErrorMessage } from '$lib/apis/files';
 
 	import {
 		chatId,
@@ -534,15 +535,20 @@
 			fileItem.url = `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`;
 
 			files = files;
+			if (uploadedFile.meta?.sensitivity_content_warning) {
+				toast.warning($i18n.t('Sensitive content detected inside the document.'));
+			}
 			toast.success($i18n.t('File uploaded successfully'));
 		} catch (e) {
 			console.error('Error uploading file:', e);
 			files = files.filter((f) => f.itemId !== tempItemId);
-			toast.error(
-				$i18n.t('Error uploading file: {{error}}', {
-					error: e.message || 'Unknown error'
-				})
-			);
+			const message =
+				e && typeof e === 'object' && 'detail' in e
+					? getUploadErrorMessage(e, $i18n.t)
+					: $i18n.t('Error uploading file: {{error}}', {
+							error: e instanceof Error ? e.message : String(e ?? 'Unknown error')
+						});
+			toast.error(message);
 		}
 	};
 
@@ -1305,13 +1311,17 @@
 		parentId: string,
 		{ modelId = null, modelIdx = null, newChat = false } = {}
 	) => {
-		// Create new chat if newChat is true and first user message
+		// Create new chat if newChat is true and first user message (skip API create when chat already loaded from server, e.g. sidebar "New Chat")
 		if (
 			newChat &&
 			history.messages[history.currentId].parentId === null &&
 			history.messages[history.currentId].role === 'user'
 		) {
-			await initChatHandler();
+			if ($temporaryChatEnabled || !chat) {
+				await initChatHandler();
+			} else {
+				await saveChatHandler($chatId);
+			}
 		} else {
 			await saveChatHandler($chatId);
 		}

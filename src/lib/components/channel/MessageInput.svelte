@@ -13,7 +13,7 @@
 	import RichTextInput from '../common/RichTextInput.svelte';
 	import VoiceRecording from '../chat/MessageInput/VoiceRecording.svelte';
 	import InputMenu from './MessageInput/InputMenu.svelte';
-	import { uploadFile } from '$lib/apis/files';
+	import { uploadFile, getUploadErrorMessage } from '$lib/apis/files';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import FileItem from '../common/FileItem.svelte';
 	import Image from '../common/Image.svelte';
@@ -188,6 +188,10 @@
 					toast.warning(uploadedFile.error);
 				}
 
+				if (uploadedFile.meta?.sensitivity_content_warning) {
+					toast.warning($i18n.t('Sensitive content detected inside the document.'));
+				}
+
 				fileItem.status = 'uploaded';
 				fileItem.file = uploadedFile;
 				fileItem.id = uploadedFile.id;
@@ -200,7 +204,7 @@
 				files = files.filter((item) => item?.itemId !== tempItemId);
 			}
 		} catch (e) {
-			toast.error(e);
+			toast.error(getUploadErrorMessage(e, $i18n.t));
 			files = files.filter((item) => item?.itemId !== tempItemId);
 		}
 	};

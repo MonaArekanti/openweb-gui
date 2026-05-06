@@ -47,7 +47,13 @@
 	export let selected = false;
 	export let shiftKey = false;
 
+	/** Move-to-folder submenu */
+	export let folderOptions: { id: string; name: string }[] = [];
+	/** Optional emoji/icon from chat metadata when API provides it */
+	export let titleEmoji = '';
+
 	let chat = null;
+	let chatMenuShow = false;
 
 	let mouseOver = false;
 	let draggable = false;
@@ -221,15 +227,25 @@
 	</DragGhost>
 {/if}
 
-<div bind:this={itemElement} class=" w-full {className} relative group" {draggable}>
+<!-- svelte-ignore a11y-no-static-element-interactions -->
+<div
+	bind:this={itemElement}
+	class=" w-full {className} relative group"
+	{draggable}
+	on:contextmenu|preventDefault={(e) => {
+		e.stopPropagation();
+		dispatch('select');
+		chatMenuShow = true;
+	}}
+>
 	{#if confirmEdit}
 		<div
-			class=" w-full flex justify-between rounded-lg px-[11px] py-[6px] {id === $chatId ||
+			class=" w-full flex justify-between rounded-full px-4 py-2.5 min-h-[40px] {id === $chatId ||
 			confirmEdit
-				? 'bg-gray-200 dark:bg-gray-900'
+				? 'bg-[#e8e8e8] dark:bg-gray-800'
 				: selected
-					? 'bg-gray-100 dark:bg-gray-950'
-					: 'group-hover:bg-gray-100 dark:group-hover:bg-gray-950'}  whitespace-nowrap text-ellipsis"
+					? 'bg-[#ebebeb] dark:bg-gray-800/80'
+					: 'group-hover:bg-[#efefef] dark:group-hover:bg-gray-800/60'}  whitespace-nowrap text-ellipsis transition-colors"
 		>
 			<input
 				use:focusEdit
@@ -239,12 +255,12 @@
 		</div>
 	{:else}
 		<a
-			class=" w-full flex justify-between rounded-lg px-[11px] py-[6px] {id === $chatId ||
+			class=" w-full flex justify-between items-center rounded-full px-4 py-2.5 min-h-[40px] {id === $chatId ||
 			confirmEdit
-				? 'bg-gray-200 dark:bg-gray-900'
+				? 'bg-[#e8e8e8] dark:bg-gray-800'
 				: selected
-					? 'bg-gray-100 dark:bg-gray-950'
-					: ' group-hover:bg-gray-100 dark:group-hover:bg-gray-950'}  whitespace-nowrap text-ellipsis"
+					? 'bg-[#ebebeb] dark:bg-gray-800/80'
+					: ' group-hover:bg-[#efefef] dark:group-hover:bg-gray-800/60'}  whitespace-nowrap text-ellipsis transition-colors"
 			href="/c/{id}"
 			on:click={() => {
 				dispatch('select');
@@ -266,8 +282,24 @@
 			on:focus={(e) => {}}
 			draggable="false"
 		>
-			<div class=" flex self-center flex-1 w-full">
-				<div class=" text-left self-center overflow-hidden w-full h-[20px]">
+			<div class=" flex self-center flex-1 w-full min-w-0 gap-2.5 items-center">
+				{#if titleEmoji}
+					<span
+						class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200/90 dark:bg-gray-700 text-[15px] leading-none"
+						aria-hidden="true"
+						>{titleEmoji}</span
+					>
+				{:else}
+					<span
+						class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-gray-200 to-gray-300 dark:from-gray-600 dark:to-gray-700 text-[10px] font-semibold text-gray-600 dark:text-gray-300"
+						aria-hidden="true"
+					>
+						{(title || '?').slice(0, 1).toUpperCase()}
+					</span>
+				{/if}
+				<div
+					class=" text-left self-center overflow-hidden w-full min-w-0 text-[14px] leading-snug line-clamp-1 text-gray-900 dark:text-gray-100"
+				>
 					{title}
 				</div>
 			</div>
@@ -352,6 +384,8 @@
 		{:else}
 			<div class="flex self-center space-x-1 z-10">
 				<ChatMenu
+					bind:show={chatMenuShow}
+					{folderOptions}
 					chatId={id}
 					cloneChatHandler={() => {
 						cloneChatHandler(id);

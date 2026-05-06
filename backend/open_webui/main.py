@@ -50,6 +50,8 @@ from open_webui.socket.main import (
     periodic_usage_pool_cleanup,
 )
 from open_webui.routers import (
+    admin_chats,
+    analytics,
     audio,
     images,
     ollama,
@@ -193,6 +195,10 @@ from open_webui.config import (
     WEBUI_NAME,
     WEBUI_BANNERS,
     WEBHOOK_URL,
+    ANALYTICS_ESTIMATED_COST_PER_TOKEN_USD,
+    UPLOAD_SENSITIVITY_RULES_PATH,
+    UPLOAD_SENSITIVE_CONTENT_ACTION,
+    UPLOAD_SENSITIVITY_VALIDATION_ENABLED,
     ADMIN_EMAIL,
     SHOW_ADMIN_DETAILS,
     JWT_EXPIRES_IN,
@@ -413,6 +419,14 @@ app.state.config.DEFAULT_USER_ROLE = DEFAULT_USER_ROLE
 
 app.state.config.USER_PERMISSIONS = USER_PERMISSIONS
 app.state.config.WEBHOOK_URL = WEBHOOK_URL
+app.state.config.ANALYTICS_ESTIMATED_COST_PER_TOKEN_USD = (
+    ANALYTICS_ESTIMATED_COST_PER_TOKEN_USD
+)
+app.state.config.UPLOAD_SENSITIVITY_VALIDATION_ENABLED = (
+    UPLOAD_SENSITIVITY_VALIDATION_ENABLED
+)
+app.state.config.UPLOAD_SENSITIVITY_RULES_PATH = UPLOAD_SENSITIVITY_RULES_PATH
+app.state.config.UPLOAD_SENSITIVE_CONTENT_ACTION = UPLOAD_SENSITIVE_CONTENT_ACTION
 app.state.config.BANNERS = WEBUI_BANNERS
 app.state.config.MODEL_ORDER_LIST = MODEL_ORDER_LIST
 
@@ -746,6 +760,14 @@ app.include_router(audio.router, prefix="/api/v1/audio", tags=["audio"])
 app.include_router(retrieval.router, prefix="/api/v1/retrieval", tags=["retrieval"])
 
 app.include_router(configs.router, prefix="/api/v1/configs", tags=["configs"])
+
+app.include_router(
+    analytics.router, prefix="/api/v1/admin/analytics", tags=["analytics"]
+)
+
+app.include_router(
+    admin_chats.router, prefix="/api/v1/admin/chats", tags=["admin-chats"]
+)
 
 app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])

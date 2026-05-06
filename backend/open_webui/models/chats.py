@@ -904,5 +904,24 @@ class ChatTable:
         except Exception:
             return False
 
+    def set_chat_flagged_by_id(self, id: str, flagged: bool) -> Optional[ChatModel]:
+        """Admin: persist flagged state under meta.is_flagged."""
+        try:
+            with get_db() as db:
+                chat = db.get(Chat, id)
+                if chat is None:
+                    return None
+                if str(chat.user_id).startswith("shared-"):
+                    return None
+                meta = dict(chat.meta or {})
+                meta["is_flagged"] = bool(flagged)
+                chat.meta = meta
+                chat.updated_at = int(time.time())
+                db.commit()
+                db.refresh(chat)
+                return ChatModel.model_validate(chat)
+        except Exception:
+            return None
+
 
 Chats = ChatTable()

@@ -2,6 +2,7 @@
 	import { DropdownMenu } from 'bits-ui';
 	import { flyAndScale } from '$lib/utils/transitions';
 	import { getContext, createEventDispatcher } from 'svelte';
+	import { toast } from 'svelte-sonner';
 
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -21,7 +22,8 @@
 	import {
 		getChatById,
 		getChatPinnedStatusById,
-		toggleChatPinnedStatusById
+		toggleChatPinnedStatusById,
+		updateChatFolderIdById
 	} from '$lib/apis/chats';
 	import { chats } from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
@@ -39,7 +41,10 @@
 
 	export let chatId = '';
 
-	let show = false;
+	/** `{ id, name }[]` for move-to-folder; empty hides submenu */
+	export let folderOptions: { id: string; name: string }[] = [];
+
+	export let show = false;
 	let pinned = false;
 
 	const pinHandler = async () => {
@@ -112,6 +117,18 @@
 				type: 'application/json'
 			});
 			saveAs(blob, `chat-export-${Date.now()}.json`);
+		}
+	};
+
+	const moveToFolder = async (folderId: string | null) => {
+		const res = await updateChatFolderIdById(localStorage.token, chatId, folderId).catch((error) => {
+			console.error(error);
+			toast.error(`${error}`);
+			return null;
+		});
+		if (res !== null) {
+			show = false;
+			dispatch('change');
 		}
 	};
 
@@ -235,6 +252,41 @@
 					</DropdownMenu.Item>
 				</DropdownMenu.SubContent>
 			</DropdownMenu.Sub>
+
+			{#if folderOptions.length > 0}
+				<DropdownMenu.Sub>
+					<DropdownMenu.SubTrigger
+						class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+					>
+						<div class="flex items-center">{$i18n.t('Move to Folder')}</div>
+					</DropdownMenu.SubTrigger>
+					<DropdownMenu.SubContent
+						class="max-h-60 overflow-y-auto w-full rounded-xl px-1 py-1.5 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg"
+						transition={flyAndScale}
+						sideOffset={8}
+					>
+						<DropdownMenu.Item
+							class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+							on:click={() => {
+								moveToFolder(null);
+							}}
+						>
+							<div class="flex items-center line-clamp-1">{$i18n.t('No folder')}</div>
+						</DropdownMenu.Item>
+						{#each folderOptions as fo}
+							<DropdownMenu.Item
+								class="flex gap-2 items-center px-3 py-2 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
+								on:click={() => {
+									moveToFolder(fo.id);
+								}}
+							>
+								<div class="flex items-center line-clamp-1">{fo.name}</div>
+							</DropdownMenu.Item>
+						{/each}
+					</DropdownMenu.SubContent>
+				</DropdownMenu.Sub>
+			{/if}
+
 			<DropdownMenu.Item
 				class="flex  gap-2  items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-md"
 				on:click={() => {
