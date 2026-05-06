@@ -1,9 +1,7 @@
 <script>
-	import { getContext } from 'svelte';
-
-	const i18n = getContext('i18n');
+	import Tokens from '$lib/components/admin/Tokens.svelte';
 </script>
 
-<div class="max-w-3xl">
-	<h1 class="text-2xl font-bold text-gray-900 dark:text-white">{$i18n.t('Tokens')}</h1>
+<div class="w-full max-w-[1400px]">
+	<Tokens />
 </div>

@@ -151,6 +151,64 @@ def filter_non_shared_chats(chats: list[ChatModel]) -> list[ChatModel]:
     return [c for c in chats if not c.user_id.startswith("shared-")]
 
 
+def iter_assistant_events_filtered(
+    chats: list[ChatModel],
+    *,
+    user_id: Optional[str] = None,
+    start_ts: Optional[int] = None,
+    end_ts_exclusive: Optional[int] = None,
+) -> Generator[dict, None, None]:
+    """Assistant token events optional filtered by user and UTC time window."""
+    for ev in iter_assistant_events(chats):
+        if user_id and ev["chat_user_id"] != user_id:
+            continue
+        ts = ev["ts"]
+        if start_ts is not None and (ts is None or ts < start_ts):
+            continue
+        if end_ts_exclusive is not None and (ts is None or ts >= end_ts_exclusive):
+            continue
+        yield ev
+
+
+def sum_tokens_in_window(
+    chats: list[ChatModel],
+    *,
+    user_id: Optional[str] = None,
+    start_ts: Optional[int] = None,
+    end_ts_exclusive: Optional[int] = None,
+) -> int:
+    return sum(
+        ev["tokens"]
+        for ev in iter_assistant_events_filtered(
+            chats,
+            user_id=user_id,
+            start_ts=start_ts,
+            end_ts_exclusive=end_ts_exclusive,
+        )
+    )
+
+
+def aggregate_model_tokens_in_window(
+    chats: list[ChatModel],
+    *,
+    user_id: Optional[str] = None,
+    start_ts: Optional[int] = None,
+    end_ts_exclusive: Optional[int] = None,
+) -> dict[str, dict]:
+    acc: dict[str, dict] = defaultdict(lambda: {"tokens": 0, "display": ""})
+    for ev in iter_assistant_events_filtered(
+        chats,
+        user_id=user_id,
+        start_ts=start_ts,
+        end_ts_exclusive=end_ts_exclusive,
+    ):
+        mid = ev["model_id"]
+        acc[mid]["tokens"] += ev["tokens"]
+        if not acc[mid]["display"]:
+            acc[mid]["display"] = ev["model_display"]
+    return acc
+
+
 def daily_instance_activity_for_year(chats: list[ChatModel], year: int) -> list[dict]:
     """UTC calendar days in ``year``: total assistant messages + tokens per day (instance-wide)."""
     y_start = date(year, 1, 1)

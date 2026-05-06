@@ -52,6 +52,7 @@ from open_webui.socket.main import (
 from open_webui.routers import (
     admin_chats,
     analytics,
+    tokens as tokens_router,
     audio,
     images,
     ollama,
@@ -767,6 +768,10 @@ app.include_router(
 
 app.include_router(
     admin_chats.router, prefix="/api/v1/admin/chats", tags=["admin-chats"]
+)
+
+app.include_router(
+    tokens_router.router, prefix="/api/v1/admin/tokens", tags=["admin-tokens"]
 )
 
 app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])

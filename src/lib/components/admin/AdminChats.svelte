@@ -271,6 +271,14 @@
 		}
 	}
 
+	function handleWindowClick(e: MouseEvent) {
+		const t = e.target;
+		const el = t instanceof Element ? t : (t as Node).parentElement;
+		if (!el) return;
+		if (showCalendar && !el.closest('[data-calendar-root]')) showCalendar = false;
+		if (tagMenuOpen && !el.closest('[data-tag-menu]')) tagMenuOpen = false;
+	}
+
 	onMount(async () => {
 		window.addEventListener('keydown', onWindowKey);
 		try {
@@ -292,10 +300,7 @@
 	});
 </script>
 
-<svelte:window on:click={(e) => {
-	if (showCalendar && !(e.target as HTMLElement).closest?.('[data-calendar-root]')) showCalendar = false;
-	if (tagMenuOpen && !(e.target as HTMLElement).closest?.('[data-tag-menu]')) tagMenuOpen = false;
-}} />
+<svelte:window on:click={handleWindowClick} />
 
 <div class="admin-chats-page pb-10 bg-[#f9f9f9] dark:bg-gray-900 min-h-full -mx-[16px] px-4 md:px-6 pt-2">
 	<!-- Stats bubbles -->
