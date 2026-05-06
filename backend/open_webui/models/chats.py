@@ -62,6 +62,7 @@ class ChatModel(BaseModel):
 
 class ChatForm(BaseModel):
     chat: dict
+    meta: Optional[dict] = None
 
 
 class ChatImportForm(ChatForm):
@@ -160,6 +161,21 @@ class ChatTable:
                 chat_item = db.get(Chat, id)
                 chat_item.chat = chat
                 chat_item.title = chat["title"] if "title" in chat else "New Chat"
+                chat_item.updated_at = int(time.time())
+                db.commit()
+                db.refresh(chat_item)
+
+                return ChatModel.model_validate(chat_item)
+        except Exception:
+            return None
+
+    def merge_meta_by_id(self, id: str, meta_patch: dict) -> Optional[ChatModel]:
+        try:
+            with get_db() as db:
+                chat_item = db.get(Chat, id)
+                if chat_item is None:
+                    return None
+                chat_item.meta = {**(chat_item.meta or {}), **meta_patch}
                 chat_item.updated_at = int(time.time())
                 db.commit()
                 db.refresh(chat_item)

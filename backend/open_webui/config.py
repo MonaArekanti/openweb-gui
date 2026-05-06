@@ -956,16 +956,25 @@ def validate_cors_origin(origin):
         raise ValueError(f"Invalid URL structure in CORS_ALLOW_ORIGIN: '{origin}'.")
 
 
-# For production, you should only need one host as
-# fastapi serves the svelte-kit built frontend and backend from the same host and port.
-# To test CORS_ALLOW_ORIGIN locally, you can set something like
-# CORS_ALLOW_ORIGIN=http://localhost:5173;http://localhost:8080
-# in your .env file depending on your frontend port, 5173 in this case.
-CORS_ALLOW_ORIGIN = os.environ.get("CORS_ALLOW_ORIGIN", "*").split(";")
+# For production, you often serve the Svelte build and API from the same origin (no CORS).
+# For split origins (e.g. Vite on :5173 + API on :8080), browsers require explicit
+# Access-Control-Allow-Origin values when requests use credentials — wildcard '*' is rejected.
+# Override with CORS_ALLOW_ORIGIN=https://your-frontend.example.com for deployed split setups.
+_DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173;http://127.0.0.1:5173;"
+    "http://localhost:8080;http://127.0.0.1:8080;"
+    "http://localhost:3000;http://127.0.0.1:3000"
+)
+CORS_ALLOW_ORIGIN = [
+    o.strip()
+    for o in os.environ.get("CORS_ALLOW_ORIGIN", _DEFAULT_CORS_ORIGINS).split(";")
+    if o.strip()
+]
 
 if "*" in CORS_ALLOW_ORIGIN:
     log.warning(
-        "\n\nWARNING: CORS_ALLOW_ORIGIN IS SET TO '*' - NOT RECOMMENDED FOR PRODUCTION DEPLOYMENTS.\n"
+        "\n\nWARNING: CORS_ALLOW_ORIGIN IS SET TO '*' — browsers block credentialed "
+        "cross-origin requests when Allow-Origin is wildcard; prefer explicit origins.\n"
     )
 
 validate_cors_origins(CORS_ALLOW_ORIGIN)
@@ -1026,15 +1035,7 @@ TITLE_GENERATION_PROMPT_TEMPLATE = PersistentConfig(
     os.environ.get("TITLE_GENERATION_PROMPT_TEMPLATE", ""),
 )
 
-DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE = """Create a concise, 3-5 word title with an emoji as a title for the chat history, in the given language. Suitable Emojis for the summary can be used to enhance understanding but avoid quotation marks or special formatting. RESPOND ONLY WITH THE TITLE TEXT.
-
-Examples of titles:
-📉 Stock Market Trends
-🍪 Perfect Chocolate Chip Recipe
-Evolution of Music Streaming
-Remote Work Productivity Tips
-Artificial Intelligence in Healthcare
-🎮 Video Game Development Insights
+DEFAULT_TITLE_GENERATION_PROMPT_TEMPLATE = """Create a short, descriptive chat title in the same language as the conversation. Use plain text only: 2–6 words, no quotes, no markdown, no emojis, no trailing punctuation. Summarize the user's intent or topic, not a single verbatim phrase unless it is already ideal. RESPOND ONLY WITH THE TITLE TEXT.
 
 <chat_history>
 {{MESSAGES:END:2}}

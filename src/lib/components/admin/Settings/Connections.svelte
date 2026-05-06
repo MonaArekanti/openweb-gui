@@ -252,62 +252,78 @@
 							{$i18n.t('OpenAI API')}
 						</div>
 
-						<div class="flex items-center">
-							<Switch
-								bind:state={ENABLE_OPENAI_API}
-								on:change={async () => {
-									await updateOpenAIHandler();
-								}}
-							/>
-						</div>
+						{#if !ENABLE_OPENAI_API}
+							<div class="flex items-center">
+								<Switch
+									bind:state={ENABLE_OPENAI_API}
+									on:change={async () => {
+										await updateOpenAIHandler();
+									}}
+								/>
+							</div>
+						{/if}
 					</div>
 
 					{#if ENABLE_OPENAI_API}
 						<div>
-							<div class="flex justify-between items-center mb-2">
-								<div class="text-sm font-medium text-gray-700 dark:text-gray-300">
-									{$i18n.t('Manage OpenAI API Connections')}
-								</div>
-
-								<Tooltip content={$i18n.t(`Add Connection`)}>
-									<button
-										class="p-1 text-xl leading-none text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition rounded-md"
-										on:click={() => {
-											showAddOpenAIConnectionModal = true;
-										}}
-										type="button"
-										aria-label={$i18n.t('Add Connection')}
+							<div class="w-[60vw] max-w-full">
+								<div
+									class="rounded-lg border border-[#e0e0e0] bg-white dark:border-gray-600 dark:bg-gray-900 overflow-hidden"
+								>
+									<div
+										class="flex items-center justify-between gap-3 border-b border-[#e0e0e0] bg-white px-4 py-2.5 dark:border-gray-700 dark:bg-gray-900"
 									>
-										<Plus />
-									</button>
-								</Tooltip>
-							</div>
-
-							<div
-								class="rounded-lg border border-[#e0e0e0] bg-white dark:border-gray-600 dark:bg-gray-900 overflow-hidden"
-							>
-								<table class="w-full table-fixed border-collapse text-sm">
-									<colgroup>
-										<col />
-										<col style="width: 148px" />
-										<col style="width: 104px" />
-									</colgroup>
-									<thead>
-										<tr class="border-b border-[#e0e0e0] bg-white dark:border-gray-700 dark:bg-gray-900">
-											<th
-												class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
-												scope="col">{$i18n.t('Connection URL')}</th
-											>
-											<th
-												class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
-												scope="col">{$i18n.t('Status')}</th
-											>
-											<th
-												class="align-middle px-4 py-3 text-right text-[13px] font-bold text-gray-900 dark:text-white"
-												scope="col">{$i18n.t('Actions')}</th
-											>
-										</tr>
-									</thead>
+										<div class="text-sm font-medium text-gray-700 dark:text-gray-300">
+											{$i18n.t('Manage OpenAI API Connections')}
+										</div>
+										<div class="flex shrink-0 items-center gap-2">
+											<Switch
+												bind:state={ENABLE_OPENAI_API}
+												on:change={async () => {
+													await updateOpenAIHandler();
+												}}
+											/>
+											<Tooltip content={$i18n.t(`Add Connection`)}>
+												<button
+													class="p-1 text-xl leading-none text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition rounded-md"
+													on:click={() => {
+														showAddOpenAIConnectionModal = true;
+													}}
+													type="button"
+													aria-label={$i18n.t('Add Connection')}
+												>
+													<Plus />
+												</button>
+											</Tooltip>
+										</div>
+									</div>
+									<table class="w-full table-fixed border-collapse text-sm">
+										<colgroup>
+											<col />
+											<col style="width: 112px" />
+											<col style="width: 148px" />
+											<col style="width: 184px" />
+										</colgroup>
+										<thead>
+											<tr class="border-b border-[#e0e0e0] bg-white dark:border-gray-700 dark:bg-gray-900">
+												<th
+													class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
+													scope="col">{$i18n.t('Connection URL')}</th
+												>
+												<th
+													class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
+													scope="col">{$i18n.t('Provider')}</th
+												>
+												<th
+													class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
+													scope="col">{$i18n.t('Status')}</th
+												>
+												<th
+													class="align-middle px-4 py-3 text-right text-[13px] font-bold text-gray-900 dark:text-white"
+													scope="col">{$i18n.t('Actions')}</th
+												>
+											</tr>
+										</thead>
 									<tbody>
 										{#each OPENAI_API_BASE_URLS as url, idx}
 											<OpenAIConnection
@@ -329,8 +345,9 @@
 												}}
 											/>
 										{/each}
-									</tbody>
-								</table>
+										</tbody>
+									</table>
+								</div>
 							</div>
 						</div>
 					{/if}
@@ -345,60 +362,71 @@
 						{$i18n.t('Ollama API')}
 					</div>
 
-					<Switch
-						bind:state={ENABLE_OLLAMA_API}
-						on:change={async () => {
-							await updateOllamaHandler();
-						}}
-					/>
+					{#if !ENABLE_OLLAMA_API}
+						<Switch
+							bind:state={ENABLE_OLLAMA_API}
+							on:change={async () => {
+								await updateOllamaHandler();
+							}}
+						/>
+					{/if}
 				</div>
 
 				{#if ENABLE_OLLAMA_API}
 					<div>
-						<div class="flex justify-between items-center mb-2">
-							<div class="text-sm font-medium text-gray-700 dark:text-gray-300">
-								{$i18n.t('Manage Ollama API Connections')}
-							</div>
-
-							<Tooltip content={$i18n.t(`Add Connection`)}>
-								<button
-									class="p-1 text-xl leading-none text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition rounded-md"
-									on:click={() => {
-										showAddOllamaConnectionModal = true;
-									}}
-									type="button"
-									aria-label={$i18n.t('Add Connection')}
+						<div class="w-[60vw] max-w-full">
+							<div
+								class="rounded-lg border border-[#e0e0e0] bg-white dark:border-gray-600 dark:bg-gray-900 overflow-hidden"
+							>
+								<div
+									class="flex items-center justify-between gap-3 border-b border-[#e0e0e0] bg-white px-4 py-2.5 dark:border-gray-700 dark:bg-gray-900"
 								>
-									<Plus />
-								</button>
-							</Tooltip>
-						</div>
-
-						<div
-							class="rounded-lg border border-[#e0e0e0] bg-white dark:border-gray-600 dark:bg-gray-900 overflow-hidden"
-						>
-							<table class="w-full table-fixed border-collapse text-sm">
-								<colgroup>
-									<col />
-									<col style="width: 148px" />
-									<col style="width: 184px" />
-								</colgroup>
-								<thead>
-									<tr class="border-b border-[#e0e0e0] bg-white dark:border-gray-700 dark:bg-gray-900">
-										<th
-											class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
-											scope="col">{$i18n.t('Connection URL')}</th
-										>
-										<th
-											class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
-											scope="col">{$i18n.t('Status')}</th
-										>
-										<th
-											class="align-middle px-4 py-3 text-right text-[13px] font-bold text-gray-900 dark:text-white"
-											scope="col">{$i18n.t('Actions')}</th
-										>
-									</tr>
-								</thead>
+									<div class="text-sm font-medium text-gray-700 dark:text-gray-300">
+										{$i18n.t('Manage Ollama API Connections')}
+									</div>
+									<div class="flex shrink-0 items-center gap-2">
+										<Switch
+											bind:state={ENABLE_OLLAMA_API}
+											on:change={async () => {
+												await updateOllamaHandler();
+											}}
+										/>
+										<Tooltip content={$i18n.t(`Add Connection`)}>
+											<button
+												class="p-1 text-xl leading-none text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200 transition rounded-md"
+												on:click={() => {
+													showAddOllamaConnectionModal = true;
+												}}
+												type="button"
+												aria-label={$i18n.t('Add Connection')}
+											>
+												<Plus />
+											</button>
+										</Tooltip>
+									</div>
+								</div>
+								<table class="w-full table-fixed border-collapse text-sm">
+									<colgroup>
+										<col />
+										<col style="width: 148px" />
+										<col style="width: 184px" />
+									</colgroup>
+									<thead>
+										<tr class="border-b border-[#e0e0e0] bg-white dark:border-gray-700 dark:bg-gray-900">
+											<th
+												class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
+												scope="col">{$i18n.t('Connection URL')}</th
+											>
+											<th
+												class="align-middle px-4 py-3 text-left text-[13px] font-bold text-gray-900 dark:text-white"
+												scope="col">{$i18n.t('Status')}</th
+											>
+											<th
+												class="align-middle px-4 py-3 text-right text-[13px] font-bold text-gray-900 dark:text-white"
+												scope="col">{$i18n.t('Actions')}</th
+											>
+										</tr>
+									</thead>
 								<tbody>
 									{#each OLLAMA_BASE_URLS as url, idx}
 										<OllamaConnection
@@ -423,8 +451,9 @@
 											}}
 										/>
 									{/each}
-								</tbody>
-							</table>
+									</tbody>
+								</table>
+							</div>
 						</div>
 
 						<div class="mt-3 text-xs text-gray-500 dark:text-gray-400">

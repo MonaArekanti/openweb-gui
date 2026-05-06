@@ -58,12 +58,91 @@ async def get_all_base_models(request: Request):
     return models
 
 
+def _config_for_url(configs: dict, url: str) -> dict:
+    if not url:
+        return {}
+    if url in configs:
+        return dict(configs.get(url) or {})
+    u = url.rstrip("/")
+    if u in configs:
+        return dict(configs.get(u) or {})
+    if f"{u}/" in configs:
+        return dict(configs.get(f"{u}/") or {})
+    return {}
+
+
+async def collect_models_for_permission_sync(request: Request) -> list[dict]:
+    """
+    Build the model list for the Permissions admin table.
+
+    Only includes models from enabled OpenAI/Ollama connections (same discovery as the
+    Connections page: per-URL enable flags, no function/pipe/arena/preset overlays).
+    Manual model_ids from each active connection config are unioned in when listed.
+    """
+    by_id: dict[str, dict] = {}
+
+    def add(m: dict) -> None:
+        mid = str(m.get("id") or "")
+        if not mid:
+            return
+        if mid not in by_id:
+            by_id[mid] = m
+
+    cfg = request.app.state.config
+
+    if getattr(cfg, "ENABLE_OPENAI_API", False):
+        try:
+            res = await openai.get_all_models(request)
+            for m in res.get("data", []):
+                add(m)
+        except Exception as e:
+            log.warning("openai.get_all_models failed in permission sync: %s", e)
+
+    if getattr(cfg, "ENABLE_OLLAMA_API", False):
+        try:
+            ollama_resp = await ollama.get_all_models(request)
+            for model in ollama_resp.get("models", []):
+                add(
+                    {
+                        "id": model["model"],
+                        "name": model.get("name", model["model"]),
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": "ollama",
+                        "ollama": model,
+                    }
+                )
+        except Exception as e:
+            log.warning("ollama.get_all_models failed in permission sync: %s", e)
+
+    if getattr(cfg, "ENABLE_OPENAI_API", False):
+        for url in list(cfg.OPENAI_API_BASE_URLS or []):
+            ac = _config_for_url(dict(cfg.OPENAI_API_CONFIGS or {}), url)
+            if not ac.get("enable", True):
+                continue
+            prefix = ac.get("prefix_id")
+            for mid in ac.get("model_ids") or []:
+                fid = f"{prefix}.{mid}" if prefix else str(mid)
+                add({"id": fid, "name": str(mid), "owned_by": "openai"})
+
+    if getattr(cfg, "ENABLE_OLLAMA_API", False):
+        for url in list(cfg.OLLAMA_BASE_URLS or []):
+            ac = _config_for_url(dict(cfg.OLLAMA_API_CONFIGS or {}), url)
+            if not ac.get("enable", True):
+                continue
+            prefix = ac.get("prefix_id")
+            for mid in ac.get("model_ids") or []:
+                fid = f"{prefix}.{mid}" if prefix else str(mid)
+                add({"id": fid, "name": str(mid), "owned_by": "ollama"})
+
+    return list(by_id.values())
+
+
 async def get_all_models(request):
     models = await get_all_base_models(request)
 
-    # If there are no models, return an empty list
-    if len(models) == 0:
-        return []
+    # Do not return early when base is empty: preset/custom models from the DB,
+    # arena entries, and pipes may still populate the list (e.g. Permissions sync).
 
     # Add arena models
     if request.app.state.config.ENABLE_EVALUATION_ARENA_MODELS:

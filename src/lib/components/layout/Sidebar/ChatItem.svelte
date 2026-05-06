@@ -74,9 +74,14 @@
 		if (title === '') {
 			toast.error($i18n.t('Title cannot be an empty string.'));
 		} else {
-			await updateChatById(localStorage.token, id, {
-				title: title
-			});
+			await updateChatById(
+				localStorage.token,
+				id,
+				{
+					title: title
+				},
+				{ title_manual: true }
+			);
 
 			if (id === $chatId) {
 				_chatTitle.set(title);

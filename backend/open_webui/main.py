@@ -26,6 +26,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Request,
     UploadFile,
     status,
@@ -52,6 +53,7 @@ from open_webui.socket.main import (
 from open_webui.routers import (
     admin_chats,
     analytics,
+    model_permissions,
     connections as connections_router,
     tokens as tokens_router,
     audio,
@@ -785,6 +787,12 @@ app.include_router(
     tags=["admin-connections"],
 )
 
+app.include_router(
+    model_permissions.router,
+    prefix="/api/v1/admin/permissions",
+    tags=["admin-permissions"],
+)
+
 app.include_router(auths.router, prefix="/api/v1/auths", tags=["auths"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
 
@@ -815,8 +823,33 @@ app.include_router(utils.router, prefix="/api/v1/utils", tags=["utils"])
 ##################################
 
 
+def resolve_model_permission_context(
+    user,
+    chat_id: Optional[str],
+    permission_context: Optional[str],
+) -> str:
+    """Whether to apply users_* or groups_* flags from model_permissions."""
+    if permission_context in ("user", "group"):
+        return permission_context
+    if not chat_id:
+        return "user"
+    from open_webui.models.chats import Chats
+
+    chat = Chats.get_chat_by_id_and_user_id(chat_id, user.id)
+    if not chat:
+        return "user"
+    if str(chat.user_id).startswith("shared-"):
+        return "group"
+    return "user"
+
+
 @app.get("/api/models")
-async def get_models(request: Request, user=Depends(get_verified_user)):
+async def get_models(
+    request: Request,
+    user=Depends(get_verified_user),
+    chat_id: Optional[str] = Query(None),
+    permission_context: Optional[str] = Query(None),
+):
     def get_filtered_models(models, user):
         filtered_models = []
         for model in models:
@@ -837,6 +870,10 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
                     user.id, type="read", access_control=model_info.access_control
                 ):
                     filtered_models.append(model)
+            else:
+                # Connection / API-discovered models not stored as workspace Models rows;
+                # include here so model_permissions (users_/groups_) can filter them next.
+                filtered_models.append(model)
 
         return filtered_models
 
@@ -860,6 +897,11 @@ async def get_models(request: Request, user=Depends(get_verified_user)):
     # Filter out models that the user does not have access to
     if user.role == "user" and not BYPASS_MODEL_ACCESS_CONTROL:
         models = get_filtered_models(models, user)
+        from open_webui.models.model_permissions import filter_models_by_context
+
+        pc = permission_context if permission_context in ("user", "group") else None
+        ctx = resolve_model_permission_context(user, chat_id, pc)
+        models = filter_models_by_context(models, ctx)
 
     log.debug(
         f"/api/models returned filtered models accessible to the user: {json.dumps([model['id'] for model in models])}"
@@ -890,11 +932,19 @@ async def chat_completion(
         model = request.app.state.MODELS[model_id]
 
         # Check if user has access to the model
+        chat_id_perm = form_data.get("chat_id")
         if not BYPASS_MODEL_ACCESS_CONTROL and user.role == "user":
             try:
                 check_model_access(user, model)
             except Exception as e:
                 raise e
+            from open_webui.models.model_permissions import is_model_allowed_for_context
+
+            ctx = resolve_model_permission_context(user, chat_id_perm, None)
+            if not is_model_allowed_for_context(str(model_id), ctx):
+                raise Exception(
+                    "Model is not enabled for this chat context (users/groups permissions)."
+                )
 
         metadata = {
             "user_id": user.id,

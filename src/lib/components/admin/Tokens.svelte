@@ -15,6 +15,9 @@
 		type BreakdownRow
 	} from '$lib/apis/admin_tokens';
 
+	import ArrowsPointingOut from '$lib/components/icons/ArrowsPointingOut.svelte';
+	import XMark from '$lib/components/icons/XMark.svelte';
+
 	dayjs.extend(utc);
 
 	const i18n = getContext('i18n');
@@ -43,12 +46,18 @@
 	let barsLoading = true;
 	let barsError: string | null = null;
 	let barTickKey = 0;
-	let usageTotalTokens = 0;
-	let usageTrendPct: number | null = null;
 	let hoverGroupId: string | null = null;
+	let hoverGroupIdModal: string | null = null;
+	let showChartModal = false;
+
+	/** All models returned by API (used for expanded chart) */
+	let modelUsageRowsAll: ModelUsageRow[] = [];
 
 	const MODELS_LIMIT = 8;
-	const CHART_HEIGHT = 320;
+	const CHART_HEIGHT = 280;
+	/** Modal chart plot height (matches bar math + container) */
+	const CHART_HEIGHT_MODAL = 560;
+	const TABLE_SCROLL_MAX_ROWS = 6;
 
 	let tableUserId = '';
 	let breakdownRows: BreakdownRow[] = [];
@@ -130,20 +139,6 @@
 		return { start, end };
 	}
 
-	function previousBarDateRange(): { start: string; end: string } | null {
-		if (barPreset === 'all') return null;
-		const r = barDateRange();
-		const start = dayjs.utc(r.start);
-		const end = dayjs.utc(r.end);
-		const spanDays = Math.max(1, end.diff(start, 'day') + 1);
-		const prevEnd = start.subtract(1, 'day');
-		const prevStart = prevEnd.subtract(spanDays - 1, 'day');
-		return {
-			start: prevStart.format('YYYY-MM-DD'),
-			end: prevEnd.format('YYYY-MM-DD')
-		};
-	}
-
 	function buildUsageRows(tokensRows: ModelBarRow[], priceRows: ModelBarRow[]): ModelUsageRow[] {
 		const byId = new Map<string, ModelUsageRow>();
 		for (const r of tokensRows) {
@@ -212,8 +207,7 @@
 			return;
 		}
 		try {
-			const prev = previousBarDateRange();
-			const requests: Promise<ModelBarRow[]>[] = [
+			const [currentTokenRows, currentPriceRows] = await Promise.all([
 				getModelTokenBars(localStorage.token, {
 					start_date: r.start,
 					end_date: r.end,
@@ -224,29 +218,17 @@
 					end_date: r.end,
 					metric: 'price'
 				})
-			];
-			if (prev) {
-				requests.push(
-					getModelTokenBars(localStorage.token, {
-						start_date: prev.start,
-						end_date: prev.end,
-						metric: 'tokens'
-					})
-				);
-			}
-			const [currentTokenRows, currentPriceRows, previousTokenRows] = await Promise.all(requests);
+			]);
 			const fullRows = buildUsageRows(currentTokenRows, currentPriceRows);
-			usageTotalTokens = fullRows.reduce((acc, row) => acc + row.tokens, 0);
-			const prevTotal = (previousTokenRows ?? []).reduce((acc, row) => acc + (Number(row.value) || 0), 0);
-			usageTrendPct = prevTotal > 0 ? ((usageTotalTokens - prevTotal) / prevTotal) * 100 : null;
+			modelUsageRowsAll = fullRows;
 			modelUsageRows = fullRows.slice(0, MODELS_LIMIT);
 			hoverGroupId = null;
+			hoverGroupIdModal = null;
 			barTickKey += 1;
 		} catch (e: unknown) {
 			barsError = typeof e === 'object' && e && 'detail' in e ? String((e as { detail: unknown }).detail) : 'Failed to load';
 			modelUsageRows = [];
-			usageTotalTokens = 0;
-			usageTrendPct = null;
+			modelUsageRowsAll = [];
 		} finally {
 			barsLoading = false;
 		}
@@ -304,12 +286,23 @@
 	}
 
 	$: sortedBreakdown = [...breakdownRows].sort(cmpRows);
+	$: breakdownTableScroll = sortedBreakdown.length > TABLE_SCROLL_MAX_ROWS;
 
 	function handleWindowClick(e: MouseEvent) {
 		const t = e.target;
 		const el = t instanceof Element ? t : (t as Node).parentElement;
 		if (!el) return;
-		if (showBarCalendar && !el.closest('[data-bar-calendar-root]')) showBarCalendar = false;
+		if (
+			showBarCalendar &&
+			!el.closest('[data-bar-calendar-root]') &&
+			!el.closest('[data-bar-calendar-root-modal]')
+		)
+			showBarCalendar = false;
+	}
+
+	function handleChartModalKeydown(e: KeyboardEvent) {
+		if (e.key !== 'Escape' || !showChartModal) return;
+		showChartModal = false;
 	}
 
 	function applyCustomBarRange() {
@@ -327,7 +320,6 @@
 	}
 
 	$: usageRowsTop = modelUsageRows.slice(0, MODELS_LIMIT);
-	$: usageSlots = Array.from({ length: MODELS_LIMIT }, (_, i) => usageRowsTop[i] ?? null);
 	$: usagePageMaxTokens = Math.max(1, ...usageRowsTop.map((r) => r.tokens));
 	$: usageYAxisMax = (() => {
 		const roughStep = Math.max(1, (usagePageMaxTokens * 1.2) / 4);
@@ -337,15 +329,25 @@
 	})();
 	$: usageYAxisTicks = [0, 1, 2, 3, 4].map((n) => (usageYAxisMax / 4) * n).reverse();
 
+	$: modalPageMaxTokens = Math.max(1, ...modelUsageRowsAll.map((r) => r.tokens));
+	$: modalYAxisMax = (() => {
+		const roughStep = Math.max(1, (modalPageMaxTokens * 1.2) / 4);
+		const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+		const niceStep = Math.ceil(roughStep / magnitude) * magnitude;
+		return niceStep * 4;
+	})();
+	$: modalYAxisTicks = [0, 1, 2, 3, 4].map((n) => (modalYAxisMax / 4) * n).reverse();
+
 	function shortModelName(name: string): string {
 		if ((name ?? '').length <= 10) return name;
 		return name.slice(0, 10) + '...';
 	}
 
-	function barHeightPx(v: number, maxV: number): number {
+	function barHeightPx(v: number, maxV: number, chartHeight: number): number {
 		if (maxV <= 0) return 4;
-		const h = (Math.max(0, v) / maxV) * (CHART_HEIGHT - 22);
-		return Math.max(4, Math.min(CHART_HEIGHT - 22, h));
+		const plotH = chartHeight - 22;
+		const h = (Math.max(0, v) / maxV) * plotH;
+		return Math.max(4, Math.min(plotH, h));
 	}
 
 	onMount(async () => {
@@ -366,7 +368,7 @@
 	});
 </script>
 
-<svelte:window on:click={handleWindowClick} />
+<svelte:window on:click={handleWindowClick} on:keydown={handleChartModalKeydown} />
 
 <div class="tokens-admin pb-12 bg-[#f9f9f9] dark:bg-gray-900 min-h-full -mx-[16px] px-4 md:px-6 pt-2">
 	<h1 class="text-[28px] font-bold text-gray-900 dark:text-white mb-8">
@@ -458,96 +460,85 @@
 		</div>
 	</div>
 
-	<!-- Shared chart + table card -->
+	<!-- Shared chart + table card: side by side on lg+ -->
 	<div
-		class="mb-6 overflow-hidden rounded-[12px] border border-[#eeeeee] bg-white p-6 shadow-[0_1px_6px_rgba(0,0,0,0.06)] dark:border-gray-700 dark:bg-gray-850"
+		class="mb-6 overflow-hidden rounded-[12px] border border-[#eeeeee] bg-white shadow-[0_1px_6px_rgba(0,0,0,0.06)] dark:border-gray-700 dark:bg-gray-850"
 	>
-		<div class="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-			<div>
-				<h2 class="text-[18px] font-bold text-gray-900 dark:text-white">{$i18n.t('Model Usage Overview')}</h2>
-				<div class="mt-2 text-[28px] font-bold leading-none tabular-nums text-[#111] dark:text-white">
-					{fmtInt(usageTotalTokens)}
-				</div>
-				<div class="mt-2 flex min-h-[22px] items-center gap-2">
-					{#if usageTrendPct !== null}
-						{#if usageTrendPct >= 0}
-							<span class="inline-flex rounded-full bg-[#dcfce7] px-2 py-[2px] text-[12px] font-bold text-[#16a34a]">
-								{Math.abs(usageTrendPct).toFixed(2)}% ↗
-							</span>
-						{:else}
-							<span class="inline-flex rounded-full bg-[#fee2e2] px-2 py-[2px] text-[12px] font-bold text-[#dc2626]">
-								▼ {Math.abs(usageTrendPct).toFixed(2)}%
-							</span>
-						{/if}
-					{/if}
-				</div>
-				<div class="mt-1 text-[13px] text-gray-500 dark:text-gray-400">Avg per period</div>
-			</div>
-			<div class="flex flex-wrap items-center gap-3 md:justify-end">
-				<div class="relative min-w-[160px]" data-bar-calendar-root>
-					<select
-						class="filter-dd w-full flex justify-between appearance-none cursor-pointer pr-8"
-						bind:value={barPreset}
-						on:change={async () => {
-							if (barPreset === 'custom') {
-								showBarCalendar = true;
-								if (!barCustomStart) barCustomStart = dayjs.utc().subtract(29, 'day').format('YYYY-MM-DD');
-								if (!barCustomEnd) barCustomEnd = dayjs.utc().format('YYYY-MM-DD');
-							} else {
-								showBarCalendar = false;
-								await loadBars();
-							}
-						}}
-					>
-						<option value="7">{$i18n.t('Last 7 Days')}</option>
-						<option value="20">{$i18n.t('Last 20 Days')}</option>
-						<option value="30">{$i18n.t('Last 30 Days')}</option>
-						<option value="all">{$i18n.t('All Time')}</option>
-						<option value="custom">{$i18n.t('Custom Range')}</option>
-					</select>
-					{#if showBarCalendar && barPreset === 'custom'}
-						<div
-							class="absolute right-0 z-50 mt-2 w-[280px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-600 dark:bg-gray-800"
-						>
-							<p class="mb-2 text-xs text-gray-500">{$i18n.t('Start date')}</p>
-							<input type="date" class="filter-dd mb-3 w-full" bind:value={barCustomStart} />
-							<p class="mb-2 text-xs text-gray-500">{$i18n.t('End date')}</p>
-							<input type="date" class="filter-dd mb-4 w-full" bind:value={barCustomEnd} />
-							<div class="flex justify-end gap-2">
-								<button
-									type="button"
-									class="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
-									on:click={() => {
+		<div class="flex flex-col lg:flex-row lg:divide-x lg:divide-[#f0f0f0] dark:lg:divide-gray-700">
+			<!-- LEFT: Model Usage Overview -->
+			<div class="flex min-h-0 min-w-0 flex-1 flex-col p-5 lg:w-1/2 lg:p-6">
+				<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+					<h2 class="text-[18px] font-bold leading-tight text-gray-900 dark:text-white">
+						{$i18n.t('Model Usage Overview')}
+					</h2>
+					<div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+						<div class="relative min-w-[140px]" data-bar-calendar-root>
+							<select
+								class="filter-dd w-full cursor-pointer appearance-none pr-8"
+								bind:value={barPreset}
+								on:change={async () => {
+									if (barPreset === 'custom') {
+										showBarCalendar = true;
+										if (!barCustomStart) barCustomStart = dayjs.utc().subtract(29, 'day').format('YYYY-MM-DD');
+										if (!barCustomEnd) barCustomEnd = dayjs.utc().format('YYYY-MM-DD');
+									} else {
 										showBarCalendar = false;
-									}}>{$i18n.t('Cancel')}</button
+										await loadBars();
+									}
+								}}
+							>
+								<option value="7">{$i18n.t('Last 7 Days')}</option>
+								<option value="20">{$i18n.t('Last 20 Days')}</option>
+								<option value="30">{$i18n.t('Last 30 Days')}</option>
+								<option value="all">{$i18n.t('All Time')}</option>
+								<option value="custom">{$i18n.t('Custom Range')}</option>
+							</select>
+							{#if showBarCalendar && barPreset === 'custom'}
+								<div
+									class="absolute right-0 z-50 mt-2 w-[280px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-600 dark:bg-gray-800"
 								>
-								<button
-									type="button"
-									class="rounded-lg bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800 disabled:opacity-40 dark:bg-white dark:text-black"
-									disabled={!barCustomStart ||
-										!barCustomEnd ||
-										barCustomEnd < barCustomStart}
-									on:click={applyCustomBarRange}
-								>
-									{$i18n.t('Apply')}
-								</button>
-							</div>
+									<p class="mb-2 text-xs text-gray-500">{$i18n.t('Start date')}</p>
+									<input type="date" class="filter-dd mb-3 w-full" bind:value={barCustomStart} />
+									<p class="mb-2 text-xs text-gray-500">{$i18n.t('End date')}</p>
+									<input type="date" class="filter-dd mb-4 w-full" bind:value={barCustomEnd} />
+									<div class="flex justify-end gap-2">
+										<button
+											type="button"
+											class="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+											on:click={() => {
+												showBarCalendar = false;
+											}}>{$i18n.t('Cancel')}</button
+										>
+										<button
+											type="button"
+											class="rounded-lg bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800 disabled:opacity-40 dark:bg-white dark:text-black"
+											disabled={!barCustomStart ||
+												!barCustomEnd ||
+												barCustomEnd < barCustomStart}
+											on:click={applyCustomBarRange}
+										>
+											{$i18n.t('Apply')}
+										</button>
+									</div>
+								</div>
+							{/if}
 						</div>
-					{/if}
+						<button
+							type="button"
+							class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#e0e0e0] text-gray-600 transition hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+							aria-label={$i18n.t('Expand')}
+							on:click={() => {
+								showBarCalendar = false;
+								showChartModal = true;
+							}}
+						>
+							<ArrowsPointingOut className="h-5 w-5" strokeWidth="1.75" />
+						</button>
+					</div>
 				</div>
-				<select class="filter-dd min-w-[160px]" bind:value={tableUserId} on:change={loadBreakdown}>
-					<option value="">{$i18n.t('All Users')}</option>
-					{#each adminUsers as u}
-						<option value={u.id}>{u.name || u.email || u.id}</option>
-					{/each}
-				</select>
-			</div>
-		</div>
 
-		<div class="flex flex-col gap-6 lg:flex-row lg:gap-0">
-			<div class="w-full lg:w-[60%] lg:pr-6">
 				{#if barsError}
-					<div class="flex min-h-[320px] flex-col items-center justify-center gap-2">
+					<div class="flex flex-col items-center justify-center gap-2 py-12" style="min-height: {CHART_HEIGHT}px">
 						<p class="text-center text-red-600 dark:text-red-400">{$i18n.t('Failed to load data.')}</p>
 						<button
 							type="button"
@@ -558,28 +549,30 @@
 						</button>
 					</div>
 				{:else if barsLoading}
-					<div class="h-[320px] w-full">
-						<div class="flex h-full items-end justify-between gap-8">
-							{#each [1, 2, 3, 4, 5, 6, 7, 8] as _}
-								<div class="flex items-end gap-[6px]">
-									<div class="h-28 w-10 animate-pulse rounded-t-[6px] bg-gray-200 dark:bg-gray-700"></div>
-									<div class="h-24 w-10 animate-pulse rounded-t-[6px] bg-gray-100 dark:bg-gray-800"></div>
+					<div class="w-full" style="height: {CHART_HEIGHT}px">
+						<div class="flex h-full items-end gap-6 px-1">
+							{#each [1, 2, 3, 4, 5, 6] as _}
+								<div class="flex min-w-0 flex-1 items-end justify-center">
+									<div class="flex max-w-[72px] items-end gap-0">
+										<div class="h-24 w-1/2 min-w-[14px] animate-pulse rounded-tl-[6px] bg-gray-200 dark:bg-gray-700"></div>
+										<div class="h-20 w-1/2 min-w-[14px] animate-pulse rounded-tr-[6px] bg-gray-100 dark:bg-gray-800"></div>
+									</div>
 								</div>
 							{/each}
 						</div>
 					</div>
 				{:else if usageRowsTop.length === 0}
-					<p class="py-24 text-center text-gray-500">{$i18n.t('No usage data for this period')}</p>
+					<p class="py-16 text-center text-gray-500">{$i18n.t('No usage data for this period')}</p>
 				{:else}
-					<div class="relative">
-						<div class="relative h-[320px]">
+					<div class="relative min-w-0">
+						<div class="relative w-full" style="height: {CHART_HEIGHT}px">
 							{#each usageYAxisTicks as tick, idx}
 								<div
 									class="absolute inset-x-0 border-t border-dashed border-[#f0f0f0] dark:border-gray-700/40"
 									style="top: {(idx / (usageYAxisTicks.length - 1)) * 100}%"
 								></div>
 							{/each}
-							<div class="absolute inset-y-0 left-0 w-12">
+							<div class="absolute inset-y-0 left-0 w-11 shrink-0">
 								{#each usageYAxisTicks as tick, idx}
 									<div
 										class="absolute -translate-y-1/2 text-[11px] text-[#999] dark:text-gray-400"
@@ -589,53 +582,56 @@
 									</div>
 								{/each}
 							</div>
-							<div class="absolute inset-y-0 left-12 right-6">
-								<div class="flex h-full items-end pb-7">
-									{#each usageSlots as row, idx (row ? row.model_id + '-' + barTickKey : 'slot-' + idx + '-' + barTickKey)}
-										<div class="flex h-full flex-col items-center justify-end" style="width: 12.5%">
-											{#if row}
-												{@const isHover = hoverGroupId === row.model_id}
-												{@const tHeight = barHeightPx(row.tokens, usageYAxisMax)}
-												{@const pHeight = barHeightPx(row.price, usageYAxisMax)}
-												<div
-													class="relative flex w-[88px] flex-col items-center"
-													on:mouseenter={() => (hoverGroupId = row.model_id)}
-													on:mouseleave={() => (hoverGroupId = null)}
-												>
-													{#if isHover}
-														<div class="absolute -top-24 z-20 w-[170px] rounded-[8px] border border-[#ececec] bg-white px-[14px] py-[10px] text-left text-[12px] shadow-[0_4px_12px_rgba(0,0,0,0.12)] dark:border-gray-700 dark:bg-gray-900">
-															<div class="truncate font-semibold text-[#111] dark:text-white">{row.model_name}</div>
-															<div class="mt-1 text-gray-600 dark:text-gray-300">Tokens: {fmtInt(row.tokens)}</div>
-															<div class="text-gray-600 dark:text-gray-300">Cost: {fmtUsd3(row.price)}</div>
-														</div>
-													{/if}
-													<div class="flex items-end gap-[6px]">
-														<div
-															class="usage-bar-grow w-[40px] rounded-t-[6px] transition-all duration-300 ease-out"
-															style="height: {tHeight}px; background: linear-gradient(180deg, #4ade80 0%, rgba(74, 222, 128, 0.15) 100%); opacity: {isHover ? 1 : 0.82};"
-														></div>
-														<div
-															class="usage-bar-grow w-[40px] rounded-t-[6px] transition-all duration-300 ease-out"
-															style="height: {pHeight}px; background: linear-gradient(180deg, #fbbf24 0%, rgba(251, 191, 36, 0.15) 100%); opacity: {isHover ? 1 : 0.82};"
-														></div>
+							<div class="absolute inset-y-0 left-11 right-0 min-w-0 overflow-hidden">
+								<div class="flex h-full items-end gap-6 px-0.5 pb-7">
+									{#each modelUsageRows as row (row.model_id + '-' + barTickKey)}
+										{@const isHover = hoverGroupId === row.model_id}
+										{@const tHeight = barHeightPx(row.tokens, usageYAxisMax, CHART_HEIGHT)}
+										{@const pHeight = barHeightPx(row.price, usageYAxisMax, CHART_HEIGHT)}
+										<div
+											class="flex h-full min-w-0 flex-1 flex-col items-stretch justify-end"
+											on:mouseenter={() => (hoverGroupId = row.model_id)}
+											on:mouseleave={() => (hoverGroupId = null)}
+										>
+											<div class="relative flex min-h-0 flex-1 flex-col items-center justify-end">
+												{#if isHover}
+													<div
+														class="absolute bottom-full z-20 mb-1 w-[min(200px,calc(100vw-2rem))] rounded-[8px] border border-[#ececec] bg-white px-[14px] py-[10px] text-left text-[12px] shadow-[0_4px_12px_rgba(0,0,0,0.12)] dark:border-gray-700 dark:bg-gray-900"
+													>
+														<div class="truncate font-semibold text-[#111] dark:text-white">{row.model_name}</div>
+														<div class="mt-1 text-gray-600 dark:text-gray-300">Tokens: {fmtInt(row.tokens)}</div>
+														<div class="text-gray-600 dark:text-gray-300">Cost: {fmtUsd3(row.price)}</div>
 													</div>
-													<div class="mt-2 max-w-[88px] truncate text-center text-[12px] text-[#999] dark:text-gray-400" title={row.model_name}>
-														{shortModelName(row.model_name)}
-													</div>
+												{/if}
+												<div class="flex w-full max-w-[72px] items-end justify-center gap-0">
+													<div
+														class="usage-bar-grow min-h-[4px] w-1/2 min-w-[14px] rounded-tl-[6px] rounded-tr-none transition-all duration-300 ease-out"
+														style="height: {tHeight}px; background: linear-gradient(180deg, #4ade80 0%, rgba(74, 222, 128, 0.15) 100%); opacity: {isHover ? 1 : 0.82};"
+													></div>
+													<div
+														class="usage-bar-grow min-h-[4px] w-1/2 min-w-[14px] rounded-tr-[6px] rounded-tl-none transition-all duration-300 ease-out"
+														style="height: {pHeight}px; background: linear-gradient(180deg, #fbbf24 0%, rgba(251, 191, 36, 0.15) 100%); opacity: {isHover ? 1 : 0.82};"
+													></div>
 												</div>
-											{/if}
+												<div
+													class="mt-2 w-full truncate text-center text-[11px] leading-tight text-[#999] dark:text-gray-400"
+													title={row.model_name}
+												>
+													{shortModelName(row.model_name)}
+												</div>
+											</div>
 										</div>
 									{/each}
 								</div>
 							</div>
 						</div>
-						<div class="mt-3 flex items-center justify-center gap-5 text-[12px] text-[#666] dark:text-gray-400">
+						<div class="mt-3 flex flex-wrap items-center justify-center gap-4 text-[12px] text-[#666] dark:text-gray-400 sm:gap-5">
 							<div class="inline-flex items-center gap-2">
-								<span class="h-2 w-2 rounded-full bg-[#4ade80]"></span>
+								<span class="h-2 w-2 shrink-0 rounded-full bg-[#4ade80]"></span>
 								{$i18n.t('Tokens')}
 							</div>
 							<div class="inline-flex items-center gap-2">
-								<span class="h-2 w-2 rounded-full bg-[#fbbf24]"></span>
+								<span class="h-2 w-2 shrink-0 rounded-full bg-[#fbbf24]"></span>
 								{$i18n.t('Price')}
 							</div>
 						</div>
@@ -643,15 +639,28 @@
 				{/if}
 			</div>
 
-			<div class="w-full border-t border-[#f0f0f0] pt-4 dark:border-gray-700 lg:w-[40%] lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-				<div class="mb-3 text-[15px] font-bold text-gray-900 dark:text-white">{$i18n.t('Token Breakdown')}</div>
+			<!-- RIGHT: Token Breakdown -->
+			<div class="flex min-h-0 min-w-0 flex-1 flex-col border-t border-[#f0f0f0] p-5 pt-6 dark:border-gray-700 lg:w-1/2 lg:border-t-0 lg:p-6">
+				<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+					<h2 class="text-[18px] font-bold leading-tight text-gray-900 dark:text-white">
+						{$i18n.t('Token Breakdown')}
+					</h2>
+					<select class="filter-dd min-w-[160px] shrink-0" bind:value={tableUserId} on:change={loadBreakdown}>
+						<option value="">{$i18n.t('All Users')}</option>
+						{#each adminUsers as u}
+							<option value={u.id}>{u.name || u.email || u.id}</option>
+						{/each}
+					</select>
+				</div>
 				{#if tableError && breakdownRows.length === 0}
 					<div class="mb-3 flex items-center gap-3 text-red-600 dark:text-red-400">
 						<span>{tableError}</span>
-						<button type="button" class="underline text-sm" on:click={loadBreakdown}>{$i18n.t('Retry')}</button>
+						<button type="button" class="text-sm underline" on:click={loadBreakdown}>{$i18n.t('Retry')}</button>
 					</div>
 				{/if}
-				<div class={sortedBreakdown.length > 8 ? 'token-table-scroll max-h-[320px] overflow-y-auto' : ''}>
+				<div
+					class={breakdownTableScroll ? 'token-table-scroll max-h-[280px] overflow-y-auto pr-0.5' : ''}
+				>
 					<table class="w-full table-fixed border-collapse text-sm">
 						<colgroup>
 							<col style="width: 34px" />
@@ -662,11 +671,31 @@
 						</colgroup>
 						<thead>
 							<tr class="border-b border-[#e8e8e8] dark:border-gray-700">
-								<th class="py-2 pr-2 text-left text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999]">#</th>
-								<th class="py-2 pr-2 text-left text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999]">{$i18n.t('Model')}</th>
-								<th class="py-2 pr-2 text-right text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999]">{$i18n.t('Total Tokens')}</th>
-								<th class="py-2 pr-2 text-right text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999]">{$i18n.t('Price/1K')}</th>
-								<th class="py-2 text-right text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999]">{$i18n.t('Total Cost')}</th>
+								<th
+									class="py-2 pr-2 text-left text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999] {breakdownTableScroll
+										? 'sticky top-0 z-10 bg-white shadow-sm dark:bg-gray-850'
+										: ''}">#</th
+								>
+								<th
+									class="py-2 pr-2 text-left text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999] {breakdownTableScroll
+										? 'sticky top-0 z-10 bg-white shadow-sm dark:bg-gray-850'
+										: ''}">{$i18n.t('Model')}</th
+								>
+								<th
+									class="py-2 pr-2 text-right text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999] {breakdownTableScroll
+										? 'sticky top-0 z-10 bg-white shadow-sm dark:bg-gray-850'
+										: ''}">{$i18n.t('Total Tokens')}</th
+								>
+								<th
+									class="py-2 pr-2 text-right text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999] {breakdownTableScroll
+										? 'sticky top-0 z-10 bg-white shadow-sm dark:bg-gray-850'
+										: ''}">{$i18n.t('Price/1K')}</th
+								>
+								<th
+									class="py-2 text-right text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999] {breakdownTableScroll
+										? 'sticky top-0 z-10 bg-white shadow-sm dark:bg-gray-850'
+										: ''}">{$i18n.t('Total Cost')}</th
+								>
 							</tr>
 						</thead>
 						<tbody>
@@ -686,13 +715,19 @@
 								{#each sortedBreakdown as row, i}
 									<tr class="border-b border-[#f5f5f5] text-[13px] hover:bg-[#f9f9f9] dark:border-gray-800 dark:hover:bg-gray-800/80">
 										<td class="py-2 pr-2 text-left tabular-nums text-gray-600 dark:text-gray-300">{i + 1}</td>
-										<td class="truncate py-2 pr-2 text-left text-[#111] dark:text-white" title={row.model_name}>{row.model_name}</td>
-										<td class="py-2 pr-2 text-right tabular-nums text-[#111] dark:text-white">{fmtInt(row.total_tokens)}</td>
+										<td class="truncate py-2 pr-2 text-left text-[#111] dark:text-white" title={row.model_name}
+											>{row.model_name}</td
+										>
+										<td class="py-2 pr-2 text-right tabular-nums text-[#111] dark:text-white"
+											>{fmtInt(row.total_tokens)}</td
+										>
 										<td class="py-2 pr-2 text-right tabular-nums text-[#111] dark:text-white">
-											{#if row.price_per_1k_usd != null}{fmtUsd4(row.price_per_1k_usd)}{:else}<span class="text-gray-400">—</span>{/if}
+											{#if row.price_per_1k_usd != null}{fmtUsd4(row.price_per_1k_usd)}{:else}<span class="text-gray-400">—</span
+												>{/if}
 										</td>
 										<td class="py-2 text-right tabular-nums text-[#111] dark:text-white">
-											{#if row.total_cost_usd != null}{fmtUsd3(row.total_cost_usd)}{:else}<span class="text-gray-400">—</span>{/if}
+											{#if row.total_cost_usd != null}{fmtUsd3(row.total_cost_usd)}{:else}<span class="text-gray-400">—</span
+												>{/if}
 										</td>
 									</tr>
 								{/each}
@@ -703,6 +738,201 @@
 			</div>
 		</div>
 	</div>
+
+	{#if showChartModal}
+		<div
+			class="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="chart-modal-title"
+		>
+			<button
+				type="button"
+				class="absolute inset-0 bg-black/60 backdrop-blur-[1px]"
+				aria-label={$i18n.t('Close')}
+				on:click={() => (showChartModal = false)}
+			></button>
+			<div
+				class="relative z-10 flex min-h-0 max-h-[92vh] w-full max-w-[min(1400px,96vw)] flex-col overflow-hidden rounded-2xl border border-[#e8e8e8] bg-white shadow-2xl dark:border-gray-600 dark:bg-gray-850"
+			>
+				<div
+					class="flex flex-wrap items-center justify-between gap-3 border-b border-[#efefef] px-4 py-3 dark:border-gray-700"
+				>
+					<h2 id="chart-modal-title" class="text-lg font-bold text-gray-900 dark:text-white">
+						{$i18n.t('Model Usage Overview')}
+					</h2>
+					<div class="flex flex-wrap items-center justify-end gap-2">
+						<div class="relative min-w-[160px]" data-bar-calendar-root-modal>
+							<select
+								class="filter-dd w-full cursor-pointer appearance-none pr-8"
+								bind:value={barPreset}
+								on:change={async () => {
+									if (barPreset === 'custom') {
+										showBarCalendar = true;
+										if (!barCustomStart) barCustomStart = dayjs.utc().subtract(29, 'day').format('YYYY-MM-DD');
+										if (!barCustomEnd) barCustomEnd = dayjs.utc().format('YYYY-MM-DD');
+									} else {
+										showBarCalendar = false;
+										await loadBars();
+									}
+								}}
+							>
+								<option value="7">{$i18n.t('Last 7 Days')}</option>
+								<option value="20">{$i18n.t('Last 20 Days')}</option>
+								<option value="30">{$i18n.t('Last 30 Days')}</option>
+								<option value="all">{$i18n.t('All Time')}</option>
+								<option value="custom">{$i18n.t('Custom Range')}</option>
+							</select>
+							{#if showBarCalendar && barPreset === 'custom'}
+								<div
+									class="absolute right-0 z-[250] mt-2 w-[280px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-600 dark:bg-gray-800"
+								>
+									<p class="mb-2 text-xs text-gray-500">{$i18n.t('Start date')}</p>
+									<input type="date" class="filter-dd mb-3 w-full" bind:value={barCustomStart} />
+									<p class="mb-2 text-xs text-gray-500">{$i18n.t('End date')}</p>
+									<input type="date" class="filter-dd mb-4 w-full" bind:value={barCustomEnd} />
+									<div class="flex justify-end gap-2">
+										<button
+											type="button"
+											class="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+											on:click={() => {
+												showBarCalendar = false;
+											}}>{$i18n.t('Cancel')}</button
+										>
+										<button
+											type="button"
+											class="rounded-lg bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800 disabled:opacity-40 dark:bg-white dark:text-black"
+											disabled={!barCustomStart ||
+												!barCustomEnd ||
+												barCustomEnd < barCustomStart}
+											on:click={applyCustomBarRange}
+										>
+											{$i18n.t('Apply')}
+										</button>
+									</div>
+								</div>
+							{/if}
+						</div>
+						<button
+							type="button"
+							class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[#e0e0e0] text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+							aria-label={$i18n.t('Close')}
+							on:click={() => (showChartModal = false)}
+						>
+							<XMark className="h-5 w-5" strokeWidth="1.75" />
+						</button>
+					</div>
+				</div>
+
+				<div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto p-8">
+					{#if barsError}
+						<div class="flex min-h-[240px] flex-col items-center justify-center gap-2 py-12">
+							<p class="text-center text-red-600 dark:text-red-400">{$i18n.t('Failed to load data.')}</p>
+							<button
+								type="button"
+								class="rounded-lg border border-[#e0e0e0] px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"
+								on:click={loadBars}
+							>
+								{$i18n.t('Retry')}
+							</button>
+						</div>
+					{:else if barsLoading}
+						<div class="flex w-full items-end justify-evenly gap-12 px-2" style="min-height: {CHART_HEIGHT_MODAL}px">
+							{#each [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as _}
+								<div class="flex max-w-[88px] flex-1 flex-col items-center justify-end gap-0 pb-10">
+									<div class="flex w-full items-end gap-0">
+										<div class="h-36 w-1/2 min-w-[20px] animate-pulse rounded-tl-md bg-gray-200 dark:bg-gray-700"></div>
+										<div class="h-28 w-1/2 min-w-[20px] animate-pulse rounded-tr-md bg-gray-100 dark:bg-gray-800"></div>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{:else if modelUsageRowsAll.length === 0}
+						<p class="py-24 text-center text-gray-500">{$i18n.t('No usage data for this period')}</p>
+					{:else}
+						<div class="flex w-full flex-1 flex-col items-stretch justify-center">
+							<div class="relative mx-auto w-full max-w-full" style="height: {CHART_HEIGHT_MODAL}px">
+								{#each modalYAxisTicks as tick, idx}
+									<div
+										class="absolute inset-x-0 border-t border-dashed border-[#f0f0f0] dark:border-gray-700/40"
+										style="top: {(idx / (modalYAxisTicks.length - 1)) * 100}%"
+									></div>
+								{/each}
+								<div class="absolute inset-y-0 left-0 w-12 shrink-0">
+									{#each modalYAxisTicks as tick, idx}
+										<div
+											class="absolute -translate-y-1/2 text-[11px] text-[#999] dark:text-gray-400"
+											style="top: {(idx / (modalYAxisTicks.length - 1)) * 100}%"
+										>
+											{fmtAxisToken(tick)}
+										</div>
+									{/each}
+								</div>
+								<div class="absolute inset-y-0 left-12 right-0 overflow-x-auto overflow-y-hidden">
+									<div
+										class="flex h-full min-w-full items-end justify-evenly gap-12 pb-10"
+										style="min-width: max(100%, {Math.max(modelUsageRowsAll.length * 96, 400)}px)"
+									>
+										{#each modelUsageRowsAll as row (row.model_id + '-modal-' + barTickKey)}
+											{@const isHoverM = hoverGroupIdModal === row.model_id}
+											{@const tHeightM = barHeightPx(row.tokens, modalYAxisMax, CHART_HEIGHT_MODAL)}
+											{@const pHeightM = barHeightPx(row.price, modalYAxisMax, CHART_HEIGHT_MODAL)}
+											<div
+												class="flex h-full w-[104px] shrink-0 flex-col items-center justify-end"
+												on:mouseenter={() => (hoverGroupIdModal = row.model_id)}
+												on:mouseleave={() => (hoverGroupIdModal = null)}
+											>
+												<div class="relative flex w-full flex-col items-center justify-end">
+													{#if isHoverM}
+														<div
+															class="absolute bottom-full z-20 mb-1 w-[200px] rounded-lg border border-[#ececec] bg-white px-3 py-2 text-left text-[12px] shadow-lg dark:border-gray-700 dark:bg-gray-900"
+														>
+															<div class="font-semibold text-[#111] dark:text-white">{row.model_name}</div>
+															<div class="mt-1 text-gray-600 dark:text-gray-300">Tokens: {fmtInt(row.tokens)}</div>
+															<div class="text-gray-600 dark:text-gray-300">Cost: {fmtUsd3(row.price)}</div>
+														</div>
+													{/if}
+													<div class="flex w-full items-end justify-center gap-0">
+														<div
+															class="usage-bar-grow min-h-[4px] w-[44px] shrink-0 rounded-tl-md rounded-tr-none transition-all duration-300 ease-out"
+															style="height: {tHeightM}px; background: linear-gradient(180deg, #4ade80 0%, rgba(74, 222, 128, 0.15) 100%); opacity: {isHoverM ? 1 : 0.82};"
+														></div>
+														<div
+															class="usage-bar-grow min-h-[4px] w-[44px] shrink-0 rounded-tr-md rounded-tl-none transition-all duration-300 ease-out"
+															style="height: {pHeightM}px; background: linear-gradient(180deg, #fbbf24 0%, rgba(251, 191, 36, 0.15) 100%); opacity: {isHoverM ? 1 : 0.82};"
+														></div>
+													</div>
+													<div
+														class="mt-2 line-clamp-2 max-h-10 w-full px-0.5 text-center text-[11px] leading-tight text-[#666] dark:text-gray-400"
+														title={row.model_name}
+													>
+														{row.model_name}
+													</div>
+												</div>
+											</div>
+										{/each}
+									</div>
+								</div>
+							</div>
+						</div>
+					{/if}
+				</div>
+
+				<div
+					class="flex shrink-0 flex-wrap items-center justify-center gap-6 border-t border-[#efefef] px-4 py-3 text-[13px] text-[#666] dark:border-gray-700 dark:text-gray-400"
+				>
+					<div class="inline-flex items-center gap-2">
+						<span class="h-2 w-2 rounded-full bg-[#4ade80]"></span>
+						{$i18n.t('Tokens')}
+					</div>
+					<div class="inline-flex items-center gap-2">
+						<span class="h-2 w-2 rounded-full bg-[#fbbf24]"></span>
+						{$i18n.t('Price')}
+					</div>
+				</div>
+			</div>
+		</div>
+	{/if}
 </div>
 
 <style>

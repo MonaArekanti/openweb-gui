@@ -34,7 +34,7 @@
 </script>
 
 <tr class="border-b border-[#f0f0f0] bg-white last:border-b-0 dark:border-gray-800 dark:bg-gray-900">
-	<td class="min-w-0 px-4 py-3 align-middle">
+	<td class="min-w-0 px-4 py-3 align-middle text-left">
 		{#if !(config?.enable ?? true)}
 			<div class="pointer-events-none opacity-50">{url}</div>
 		{:else if editingUrl}
@@ -50,7 +50,7 @@
 			</div>
 		{/if}
 	</td>
-	<td class="px-4 py-3 align-middle whitespace-nowrap">
+	<td class="px-4 py-3 align-middle whitespace-nowrap text-left">
 		{#if reachable === null}
 			<span class="text-[13px] text-gray-400">…</span>
 		{:else if reachable}

@@ -7,6 +7,7 @@
 	import mermaid from 'mermaid';
 
 	import { goto } from '$app/navigation';
+	import { get } from 'svelte/store';
 	import { page } from '$app/stores';
 	import { fade } from 'svelte/transition';
 
@@ -94,7 +95,6 @@
 				settings.set(localStorageSettings);
 			}
 
-			models.set(await getModels(localStorage.token));
 			banners.set(await getBanners(localStorage.token));
 			tools.set(await getTools(localStorage.token));
 
@@ -205,6 +205,30 @@
 		}
 
 		loaded = true;
+
+		const refetchModelsOnVisible = () => {
+			if (document.visibilityState !== 'visible') return;
+			const u = get(user);
+			if (!u || !['user', 'admin'].includes(u.role)) return;
+			const path = get(page).url.pathname;
+			const chatMatch = path.match(/^\/c\/([^/]+)/);
+			const chatId = chatMatch?.[1];
+			const workspace = path.startsWith('/workspace');
+			const opts =
+				chatId != null
+					? { chatId }
+					: workspace
+						? { permissionContext: 'group' as const }
+						: undefined;
+			getModels(localStorage.token, false, opts)
+				.then((list) => models.set(list))
+				.catch((err) => console.error(err));
+		};
+		document.addEventListener('visibilitychange', refetchModelsOnVisible);
+
+		return () => {
+			document.removeEventListener('visibilitychange', refetchModelsOnVisible);
+		};
 	});
 
 	const checkForVersionUpdates = async () => {
@@ -215,6 +239,22 @@
 			};
 		});
 	};
+
+	$: if (loaded && $user && ['user', 'admin'].includes($user.role)) {
+		const path = $page.url.pathname;
+		const chatMatch = path.match(/^\/c\/([^/]+)/);
+		const chatId = chatMatch?.[1];
+		const workspace = path.startsWith('/workspace');
+		const opts =
+			chatId != null
+				? { chatId }
+				: workspace
+					? { permissionContext: 'group' as const }
+					: undefined;
+		getModels(localStorage.token, false, opts)
+			.then((list) => models.set(list))
+			.catch((err) => console.error(err));
+	}
 </script>
 
 <SettingsModal bind:show={$showSettings} />

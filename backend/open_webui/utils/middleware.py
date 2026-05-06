@@ -757,7 +757,14 @@ async def process_chat_response(
             messages = get_message_list(message_map, message.get("id"))
 
             if tasks:
-                if TASKS.TITLE_GENERATION in tasks:
+                chat_record = Chats.get_chat_by_id(metadata["chat_id"])
+                title_manual = (
+                    bool((chat_record.meta or {}).get("title_manual"))
+                    if chat_record
+                    else False
+                )
+
+                if TASKS.TITLE_GENERATION in tasks and not title_manual:
                     if tasks[TASKS.TITLE_GENERATION]:
                         res = await generate_title(
                             request,
@@ -782,25 +789,29 @@ async def process_chat_response(
                             if not title:
                                 title = messages[0].get("content", "New Chat")
 
+                            title = " ".join(title.split())[:200]
+
                             Chats.update_chat_title_by_id(metadata["chat_id"], title)
 
-                            await event_emitter(
-                                {
-                                    "type": "chat:title",
-                                    "data": title,
-                                }
-                            )
+                            if event_emitter:
+                                await event_emitter(
+                                    {
+                                        "type": "chat:title",
+                                        "data": title,
+                                    }
+                                )
                     elif len(messages) == 2:
                         title = messages[0].get("content", "New Chat")
 
                         Chats.update_chat_title_by_id(metadata["chat_id"], title)
 
-                        await event_emitter(
-                            {
-                                "type": "chat:title",
-                                "data": message.get("content", "New Chat"),
-                            }
-                        )
+                        if event_emitter:
+                            await event_emitter(
+                                {
+                                    "type": "chat:title",
+                                    "data": message.get("content", "New Chat"),
+                                }
+                            )
 
                 if TASKS.TAGS_GENERATION in tasks and tasks[TASKS.TAGS_GENERATION]:
                     res = await generate_chat_tags(
@@ -830,12 +841,13 @@ async def process_chat_response(
                                 metadata["chat_id"], tags, user
                             )
 
-                            await event_emitter(
-                                {
-                                    "type": "chat:tags",
-                                    "data": tags,
-                                }
-                            )
+                            if event_emitter:
+                                await event_emitter(
+                                    {
+                                        "type": "chat:tags",
+                                        "data": tags,
+                                    }
+                                )
                         except Exception as e:
                             print(f"Error: {e}")
 

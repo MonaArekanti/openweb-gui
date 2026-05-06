@@ -364,6 +364,9 @@ async def update_chat_by_id(
     if chat:
         updated_chat = {**chat.chat, **form_data.chat}
         chat = Chats.update_chat_by_id(id, updated_chat)
+        if form_data.meta is not None:
+            Chats.merge_meta_by_id(id, form_data.meta)
+            chat = Chats.get_chat_by_id_and_user_id(id, user.id)
         return ChatResponse(**chat.model_dump())
     else:
         raise HTTPException(

@@ -1,15 +1,26 @@
 import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
-export const getModels = async (token: string = '', base: boolean = false) => {
+export const getModels = async (
+	token: string = '',
+	base: boolean = false,
+	opts?: { chatId?: string; permissionContext?: 'user' | 'group' }
+) => {
 	let error = null;
-	const res = await fetch(`${WEBUI_BASE_URL}/api/models${base ? '/base' : ''}`, {
-		method: 'GET',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
+	const params = new URLSearchParams();
+	if (opts?.chatId) params.set('chat_id', opts.chatId);
+	if (opts?.permissionContext) params.set('permission_context', opts.permissionContext);
+	const q = params.toString();
+	const res = await fetch(
+		`${WEBUI_BASE_URL}/api/models${base ? '/base' : ''}${q ? `?${q}` : ''}`,
+		{
+			method: 'GET',
+			headers: {
+				Accept: 'application/json',
+				'Content-Type': 'application/json',
+				...(token && { authorization: `Bearer ${token}` })
+			}
 		}
-	})
+	)
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();

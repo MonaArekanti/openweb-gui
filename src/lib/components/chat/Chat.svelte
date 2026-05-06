@@ -1492,7 +1492,13 @@
 				: undefined,
 			...createMessagesList(responseMessageId)
 		]
-			.filter((message) => message?.content?.trim())
+			.filter((message) =>
+				typeof message?.content === 'string'
+					? message.content.trim()
+					: Array.isArray(message?.content)
+						? message.content.length > 0
+						: !!message?.content
+			)
 			.map((message, idx, arr) => ({
 				role: message.role,
 				...((message.files?.filter((file) => file.type === 'image').length > 0 ?? false) &&
@@ -1549,10 +1555,9 @@
 				id: responseMessageId,
 
 				...(!$temporaryChatEnabled &&
-				(messages.length == 1 ||
-					(messages.length == 2 &&
-						messages.at(0)?.role === 'system' &&
-						messages.at(1)?.role === 'user')) &&
+				userMessage &&
+				userMessage.role === 'user' &&
+				userMessage.parentId === null &&
 				selectedModels[0] === model.id
 					? {
 							background_tasks: {

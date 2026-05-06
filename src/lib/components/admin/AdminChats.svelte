@@ -293,55 +293,46 @@
 <svelte:window on:click={handleWindowClick} />
 
 <div class="admin-chats-page min-h-full -mx-[16px] bg-[#f9f9f9] px-4 pb-10 pt-2 dark:bg-gray-900 md:px-6">
-	<div class="mx-auto w-full max-w-3xl">
+	<div class="w-full">
 		<!-- Documents: uploaded files + sensitivity validation (user & date align with filters below) -->
-		<div
-			class="mb-8 grid w-full grid-cols-1 gap-4 sm:grid-cols-2"
-			aria-live="polite"
-		>
+		<div class="mb-6 grid w-full grid-cols-2 gap-3" aria-live="polite">
 			<div
-				class="flex min-w-0 flex-col rounded-xl border border-indigo-100/90 bg-gradient-to-br from-indigo-50/95 via-white to-white px-6 py-4 shadow-sm dark:border-indigo-900/45 dark:from-indigo-950/55 dark:via-zinc-900/90 dark:to-zinc-900"
+				class="h-[72px] flex w-full min-w-0 items-stretch rounded-[8px] border border-[#e8e8e8] bg-white dark:border-gray-700 dark:bg-gray-850"
 			>
-				<span
-					class="text-xs font-medium uppercase tracking-widest text-indigo-500/90 dark:text-indigo-300/85"
-					>{$i18n.t('Total Documents')}</span
-				>
-				{#if statsLoading}
-					<span
-						class="mt-1 text-3xl font-semibold tabular-nums text-indigo-950/40 dark:text-indigo-100/40"
-						>…</span
-					>
-				{:else}
-					{#key stats?.total_documents}
-						<span
-							in:fade={{ duration: 160 }}
-							class="mt-1 text-3xl font-semibold tabular-nums text-indigo-950 dark:text-indigo-50"
-							>{stats?.total_documents ?? 0}</span
+				<div class="h-full w-[3px] shrink-0 bg-[#2EC4B6]"></div>
+				<div class="flex min-w-0 flex-1 flex-col justify-center px-4 py-[10px]">
+					<div class="text-[11px] font-medium uppercase tracking-[0.04em] text-[#999]">
+						{$i18n.t('Total Documents')}
+					</div>
+					{#if statsLoading}
+						<div class="mt-1 h-6 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+					{:else}
+						<div
+							class="mt-1 truncate text-[20px] font-bold leading-none tabular-nums text-[#111] dark:text-white"
 						>
-					{/key}
-				{/if}
+							{stats?.total_documents ?? 0}
+						</div>
+					{/if}
+				</div>
 			</div>
 			<div
-				class="flex min-w-0 flex-col rounded-xl border border-rose-100/90 bg-gradient-to-br from-rose-50/90 via-white to-white px-6 py-4 shadow-sm dark:border-rose-900/40 dark:from-rose-950/45 dark:via-zinc-900/90 dark:to-zinc-900"
+				class="h-[72px] flex w-full min-w-0 items-stretch rounded-[8px] border border-[#e8e8e8] bg-white dark:border-gray-700 dark:bg-gray-850"
 			>
-				<span
-					class="text-xs font-medium uppercase tracking-widest text-rose-500/85 dark:text-rose-300/80"
-					>{$i18n.t('Flagged Documents')}</span
-				>
-				{#if statsLoading}
-					<span
-						class="mt-1 text-3xl font-semibold tabular-nums text-rose-950/35 dark:text-rose-50/35"
-						>…</span
-					>
-				{:else}
-					{#key stats?.flagged_documents}
-						<span
-							in:fade={{ duration: 160 }}
-							class="mt-1 text-3xl font-semibold tabular-nums text-rose-900 dark:text-rose-100"
-							>{stats?.flagged_documents ?? 0}</span
+				<div class="h-full w-[3px] shrink-0 bg-[#F4845F]"></div>
+				<div class="flex min-w-0 flex-1 flex-col justify-center px-4 py-[10px]">
+					<div class="text-[11px] font-medium uppercase tracking-[0.04em] text-[#999]">
+						{$i18n.t('Flagged Documents')}
+					</div>
+					{#if statsLoading}
+						<div class="mt-1 h-6 w-16 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+					{:else}
+						<div
+							class="mt-1 truncate text-[20px] font-bold leading-none tabular-nums text-[#111] dark:text-white"
 						>
-					{/key}
-				{/if}
+							{stats?.flagged_documents ?? 0}
+						</div>
+					{/if}
+				</div>
 			</div>
 		</div>
 
