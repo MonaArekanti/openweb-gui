@@ -33,7 +33,7 @@
 	let modelId = '';
 	let modelIds = [];
 
-	/** USD per 1K tokens for this connection (saved under config.price_per_1k) */
+	/** Pricing field for this connection (stored under config.price_per_1k; UI shows per-1M label). */
 	let pricePer1k = '';
 
 	let loading = false;
@@ -276,10 +276,10 @@
 								</p>
 								<label
 									class="block text-[13px] font-bold text-[#111] dark:text-white mb-1.5"
-									for="conn-price-per-1k">{$i18n.t('Price per 1K Tokens (USD)')}</label
+									for="conn-price-per-1m">{$i18n.t('Price per 1M Token (USD)')}</label
 								>
 								<input
-									id="conn-price-per-1k"
+									id="conn-price-per-1m"
 									class="w-full rounded-lg border-2 border-[#2EC4B6] bg-[#f0fffe] dark:bg-gray-850 dark:border-teal-500 px-[14px] py-2.5 text-sm text-gray-900 dark:text-white outline-none"
 									type="number"
 									step="0.0001"

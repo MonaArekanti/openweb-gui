@@ -689,7 +689,7 @@
 								<th
 									class="py-2 pr-2 text-right text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999] {breakdownTableScroll
 										? 'sticky top-0 z-10 bg-white shadow-sm dark:bg-gray-850'
-										: ''}">{$i18n.t('Price/1K')}</th
+										: ''}">{$i18n.t('Price/1M')}</th
 								>
 								<th
 									class="py-2 text-right text-[11px] font-semibold uppercase tracking-[0.02em] text-[#999] {breakdownTableScroll
