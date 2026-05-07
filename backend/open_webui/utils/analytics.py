@@ -122,11 +122,13 @@ def usage_over_time_points(
         .timestamp()
     )
     tallies: dict[tuple[str, str], float] = defaultdict(float)
+    uid_filter = str(user_id).strip() if user_id else None
+    mid_filter = str(model_id).strip() if model_id else None
 
     for ev in iter_assistant_events(chats):
-        if user_id and ev["chat_user_id"] != user_id:
+        if uid_filter and str(ev["chat_user_id"]).strip() != uid_filter:
             continue
-        if model_id and ev["model_id"] != model_id:
+        if mid_filter and str(ev["model_id"]).strip() != mid_filter:
             continue
         ts = ev["ts"]
         if ts is None:
@@ -159,8 +161,9 @@ def iter_assistant_events_filtered(
     end_ts_exclusive: Optional[int] = None,
 ) -> Generator[dict, None, None]:
     """Assistant token events optional filtered by user and UTC time window."""
+    uid_f = str(user_id).strip() if user_id else None
     for ev in iter_assistant_events(chats):
-        if user_id and ev["chat_user_id"] != user_id:
+        if uid_f and str(ev["chat_user_id"]).strip() != uid_f:
             continue
         ts = ev["ts"]
         if start_ts is not None and (ts is None or ts < start_ts):

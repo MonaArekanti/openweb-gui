@@ -170,6 +170,12 @@ class UsersTable:
 
             return [UserModel.model_validate(user) for user in users]
 
+    def get_all_users(self) -> list[UserModel]:
+        """Every user in the directory (no pagination). Same source as admin Users overview."""
+        with get_db() as db:
+            users = db.query(User).order_by(User.created_at.desc()).all()
+            return [UserModel.model_validate(user) for user in users]
+
     def get_users_by_user_ids(self, user_ids: list[str]) -> list[UserModel]:
         with get_db() as db:
             users = db.query(User).filter(User.id.in_(user_ids)).all()

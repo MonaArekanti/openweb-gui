@@ -92,21 +92,17 @@ class LineChartFilterOptionsResponse(BaseModel):
     response_model=LineChartFilterOptionsResponse,
 )
 async def get_line_chart_filter_options(user=Depends(get_admin_user)):
-    """Users and models that appear in persisted chat analytics (actual usage only)."""
+    """User filter: everyone in the Users table. Models: from persisted chat usage."""
     del user
-    chats_all = filter_non_shared_chats(Chats.get_chats())
-    ua = aggregate_user_activity(chats_all)
-    ma = aggregate_model_usage(chats_all)
-
+    all_users = Users.get_all_users()
     users_out: list[LineChartFilterOption] = []
-    for uid in ua:
-        u = Users.get_user_by_id(uid)
-        if u:
-            label = (u.name or u.email or "").strip() or str(uid)
-        else:
-            label = str(uid)
-        users_out.append(LineChartFilterOption(id=str(uid), name=label))
+    for u in all_users:
+        label = (u.name or u.email or "").strip() or str(u.id)
+        users_out.append(LineChartFilterOption(id=str(u.id), name=label))
     users_out.sort(key=lambda x: x.name.lower())
+
+    chats_all = filter_non_shared_chats(Chats.get_chats())
+    ma = aggregate_model_usage(chats_all)
 
     models_out: list[LineChartFilterOption] = []
     for mid, data in ma.items():
@@ -221,15 +217,15 @@ async def get_user_activity(user=Depends(get_admin_user)):
     acc = aggregate_user_activity(chats_all)
 
     enriched = []
-    for uid, stats in acc.items():
-        u = Users.get_user_by_id(uid)
-        label = u.name if u else uid
-        role = u.role if u else "user"
+    for u in Users.get_all_users():
+        uid = str(u.id)
+        stats = acc.get(uid) or {"messages": 0, "tokens": 0}
+        label = (u.name or u.email or "").strip() or uid
         enriched.append(
             {
                 "user_id": uid,
                 "label": label,
-                "role": role,
+                "role": u.role or "user",
                 "messages": stats["messages"],
                 "tokens": stats["tokens"],
             }

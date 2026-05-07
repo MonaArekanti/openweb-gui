@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getContext, onDestroy, onMount, tick } from 'svelte';
+	import { afterNavigate } from '$app/navigation';
 	import dayjs from 'dayjs';
 	import utc from 'dayjs/plugin/utc';
 	import { Chart, registerables } from 'chart.js';
@@ -95,7 +96,7 @@
 	let tablesLoading = true;
 	let tablesError: string | null = null;
 
-	/** Line chart filters only: derived from chats with real usage (see API). */
+	/** Line chart user options from Users table; model options from chat usage (see API). */
 	let lineChartUsers: { id: string; name: string }[] = [];
 	let lineChartModels: { id: string; name: string }[] = [];
 
@@ -858,9 +859,30 @@
 		if (!t.closest?.('[data-heatmap-year]')) showHeatmapYearPicker = false;
 	}
 
+	async function onVisibilityChange() {
+		if (document.visibilityState !== 'visible') return;
+		await Promise.all([loadLineChartFilters(), loadTables()]);
+		await loadLineData();
+	}
+
+	/** Refresh user lists when navigating into Analytics (e.g. after adding users on Admin → Users). */
+	async function refreshUserScopedAnalytics() {
+		await loadSummary();
+		await Promise.all([loadLineChartFilters(), loadTables()]);
+		await loadLineData();
+	}
+
+	afterNavigate(({ from, to }) => {
+		if (to?.url?.pathname !== '/admin/analytics') return;
+		if (from && from.url.pathname !== '/admin/analytics') {
+			void refreshUserScopedAnalytics();
+		}
+	});
+
 	onMount(() => {
 		Chart.register(...registerables);
 		document.addEventListener('click', onDocClick);
+		document.addEventListener('visibilitychange', onVisibilityChange);
 		loadSummary();
 		loadTables();
 		loadHeatmap();
@@ -868,7 +890,10 @@
 			await loadLineChartFilters();
 			await loadLineData();
 		})();
-		return () => document.removeEventListener('click', onDocClick);
+		return () => {
+			document.removeEventListener('click', onDocClick);
+			document.removeEventListener('visibilitychange', onVisibilityChange);
+		};
 	});
 
 	onDestroy(() => {
